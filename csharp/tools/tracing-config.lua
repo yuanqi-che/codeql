@@ -1,24 +1,34 @@
-function RegisterExtractorPack()
-    local extractorDirectory = "tools" .. PathSep .. PlatformDirectory ..
-                                   PathSep
-    local csharpExtractor = extractorDirectory ..
+function RegisterExtractorPack(id)
+    local csharpExtractor = GetPlatformToolsDirectory() ..
                                 'Semmle.Extraction.CSharp.Driver'
     if OperatingSystem == 'windows' then
-        csharpExtractor = extractorDirectory ..
+        csharpExtractor = GetPlatformToolsDirectory() ..
                               'Semmle.Extraction.CSharp.Driver.exe'
     end
 
-    -- TODO Windows support for the entire file
-    -- everything here is very experimental and only a proof of concept
     function DotnetMatcherBuild(compilerName, compilerPath, argv)
         if compilerName ~= 'dotnet' then return nil end
 
-        -- this is probably too simplistic, but works for now
+        -- The dotnet CLI has the following usage instructions:
+        -- dotnet [sdk-options] [command] [command-options] [arguments]
+        -- we are interested in dotnet build, which has the following usage instructions:
+        -- dotnet [options] build [<PROJECT | SOLUTION>...]
+        -- however, `dotnet -h build`, although documented, does not work
+        -- For now, parse the command line as follows:
+        -- Everything that starts with `-` will be ignored.
+        -- The first non-option argument is treated as the command.
+        -- if that's `build`, we append `/p:UseSharedCompilation=false` to the command line,
+        -- otherwise we do nothing.
         local match = false
-        for _, arg in ipairs(argv) do
-            if arg == 'build' then
-                match = true
-                break
+        for i, arg in ipairs(argv) do
+            -- the first argument in argv is `dotnet`, skip that
+            -- TODO windows check if this assumption holds
+            if i > 1 then
+                -- TODO check if on Windows, `/` is also applicable for options
+                if not string.sub(arg, 1, 1) == '-' then
+                    if arg == 'build' then match = true end
+                    break
+                end
             end
         end
         if match then
@@ -52,29 +62,51 @@ function RegisterExtractorPack()
                 break
             end
         end
-        if match then
-            return {
-                trace = true,
-                replace = false,
-                invocations = {
-                    {
-                        path = GetExtractorPath('csharp', csharpExtractor),
-                        argv = newArgv
-                    }
+        if not match then return nil end
+        return {
+            trace = true,
+            replace = false,
+            invocations = {
+                {
+                    path = AbsolutifyExtractorPath(id, csharpExtractor),
+                    argv = newArgv
                 }
             }
-        else
-            return nil
-        end
+        }
     end
 
     -- TODO windows matchers patterns
     local matchers = {
-        CreatePatternMatcher('csharp', {'^mcs.exe$', '^csc.exe$'},
-                             MatchCompilerName, csharpExtractor,
+        CreatePatternMatcher({'^fakes.*%.exe$', '^moles.*%.exe$'},
+                             MatchCompilerName, nil, {trace = false}),
+        CreatePatternMatcher({'^mcs%.exe$', '^csc.*%.exe$'}, MatchCompilerName,
+                             csharpExtractor,
                              {prepend = {'--compiler', '${compiler}', '--cil'}}),
-        DotnetMatcherBuild, DotnetMatcherExec
+        -- Note that the order here is intentional - if we find `dotnet build`,
+        -- we do not execute the action for `dotnet` that comes next in the list
+        DotnetMatcherBuild,
+        -- TODO we could replace this unconditional extractor invocation with some smarter Lua code.
+        -- Then, after the legacy driver has been removed, we could remove the --dotnetexec mode of
+        -- the extractor driver.
+        CreatePatternMatcher({'^dotnet%.exe$', '^dotnet$', '^mono.*$'},
+                             MatchCompilerName, csharpExtractor,
+                             {prepend = {'--dotnetexec', '--cil'}})
     }
 
-    RegisterLanguage('csharp', matchers)
+    -- On Posix, we disable shared compilations for msbuild and xbuild
+    if IsPosix() then
+        table.insert(matchers,
+                     CreatePatternMatcher({'^msbuild$', '^xbuild$'},
+                                          MatchCompilerName, '${compiler}', {
+            append = {
+                '/p:UseSharedCompilation=false',
+                options = {replace = true}
+            }
+        }))
+    end
+    return matchers
 end
+
+-- Return a list of minimum supported versions of the configuration file format
+-- return one entry per supported major version.
+function GetCompatibleVersions() return {'1.0.0'} end
