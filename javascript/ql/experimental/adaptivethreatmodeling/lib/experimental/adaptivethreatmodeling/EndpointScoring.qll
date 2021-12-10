@@ -80,22 +80,28 @@ DatabaseFeatures::Entity getRepresentativeEntityForEndpoint(DataFlow::Node endpo
 }
 
 module ModelScoring {
-  predicate endpoints(DataFlow::Node endpoint) {
-    getCfg().isEffectiveSource(endpoint) or
-    getCfg().isEffectiveSink(endpoint)
+  /**
+   * Get an endpoint to score.
+   *
+   * We only score new candidate endpoints that are part of a flow path.
+   */
+  DataFlow::Node getAnEndpoint() {
+    getCfg().isEffectiveSource(result) and any(DataFlow::Configuration cfg).hasFlow(result, _)
+    or
+    getCfg().isEffectiveSink(result) and any(DataFlow::Configuration cfg).hasFlow(_, result)
+  }
+
+  /** A featurization config that featurizes the endpoints in `endpoints`. */
+  class RelevantFeaturizationConfig extends EndpointFeatures::FeaturizationConfig {
+    RelevantFeaturizationConfig() { this = "RelevantFeaturization" }
+
+    override DataFlow::Node getAnEndpointToFeaturize() { result = getAnEndpoint() }
   }
 
   private int requestedEndpointTypes() { result = any(EndpointType type).getEncoding() }
 
-  private predicate relevantTokenFeatures(
-    DataFlow::Node endpoint, string featureName, string featureValue
-  ) {
-    endpoints(endpoint) and
-    EndpointFeatures::tokenFeatures(endpoint, featureName, featureValue)
-  }
-
   predicate endpointScores(DataFlow::Node endpoint, int encodedEndpointType, float score) =
-    scoreEndpoints(endpoints/1, requestedEndpointTypes/0, relevantTokenFeatures/3,
+    scoreEndpoints(getAnEndpoint/0, requestedEndpointTypes/0, EndpointFeatures::tokenFeatures/3,
       getACompatibleModelChecksum/0)(endpoint, encodedEndpointType, score)
 }
 
@@ -212,7 +218,9 @@ class EndpointScoringResults extends ScoringResults {
 }
 
 module Debugging {
-  query predicate hopInputEndpoints = ModelScoring::endpoints/1;
+  query predicate hopInputEndpoints(DataFlow::Node endpoint) {
+    endpoint = ModelScoring::getAnEndpoint()
+  }
 
   query predicate endpointScores = ModelScoring::endpointScores/3;
 
