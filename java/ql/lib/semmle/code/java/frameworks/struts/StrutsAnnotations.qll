@@ -15,6 +15,7 @@ class StrutsAnnotation extends Annotation {
 class StrutsActionAnnotation extends StrutsAnnotation {
   StrutsActionAnnotation() { this.getType().hasName("Action") }
 
+  /** Gets a callable annotated with this annotation. */
   Callable getActionCallable() {
     result = this.getAnnotatedElement()
     or
@@ -33,5 +34,5 @@ class StrutsActionsAnnotation extends StrutsAnnotation {
   /**
    * Gets an Action annotation contained in this Actions annotation.
    */
-  StrutsActionAnnotation getAnAction() { result = this.getAValue("value") }
+  StrutsActionAnnotation getAnAction() { result = this.getAnArrayValue("value") }
 }

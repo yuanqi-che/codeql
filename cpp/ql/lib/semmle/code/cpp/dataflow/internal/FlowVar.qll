@@ -1,11 +1,13 @@
 /**
+ * DEPRECATED: Use `semmle.code.cpp.dataflow.new.DataFlow` instead.
+ *
  * Provides a class for handling variables in the data flow analysis.
  */
 
 import cpp
 private import semmle.code.cpp.controlflow.SSA
-private import semmle.code.cpp.dataflow.internal.SubBasicBlocks
-private import semmle.code.cpp.dataflow.internal.AddressFlow
+private import SubBasicBlocks
+private import AddressFlow
 private import semmle.code.cpp.models.implementations.Iterator
 private import semmle.code.cpp.models.interfaces.PointerWrapper
 
@@ -113,10 +115,6 @@ private module PartialDefinitions {
   abstract class PartialDefinition extends Expr {
     ControlFlowNode node;
 
-    abstract deprecated predicate partiallyDefines(Variable v);
-
-    abstract deprecated predicate partiallyDefinesThis(ThisExpr e);
-
     /**
      * Gets the subBasicBlock where this `PartialDefinition` is defined.
      */
@@ -189,10 +187,6 @@ private module PartialDefinitions {
       )
     }
 
-    deprecated override predicate partiallyDefines(Variable v) { v = collection }
-
-    deprecated override predicate partiallyDefinesThis(ThisExpr e) { none() }
-
     override predicate definesExpressions(Expr inner, Expr outer) {
       inner = innerDefinedExpr and
       outer = this
@@ -216,12 +210,6 @@ private module PartialDefinitions {
     Expr innerDefinedExpr;
 
     VariablePartialDefinition() { innerDefinedExpr = getInnerDefinedExpr(this, node) }
-
-    deprecated override predicate partiallyDefines(Variable v) {
-      innerDefinedExpr = v.getAnAccess()
-    }
-
-    deprecated override predicate partiallyDefinesThis(ThisExpr e) { innerDefinedExpr = e }
 
     /**
      * Holds if this partial definition may modify `inner` (or what it points
@@ -353,9 +341,9 @@ module FlowVar_internal {
         // indirection.
         result = def.getAUse(v)
         or
-        exists(SsaDefinition descendentDef |
-          this.getASuccessorSsaVar+() = TSsaVar(descendentDef, _) and
-          result = descendentDef.getAUse(v)
+        exists(SsaDefinition descendantDef |
+          this.getASuccessorSsaVar+() = TSsaVar(descendantDef, _) and
+          result = descendantDef.getAUse(v)
         )
       )
       or
@@ -435,7 +423,7 @@ module FlowVar_internal {
       parameterIsNonConstReference(p) and
       p = v and
       // This definition reaches the exit node of the function CFG
-      getAReachedBlockVarSBB(this).getANode() = p.getFunction()
+      getAReachedBlockVarSBB(this).getEnd() = p.getFunction()
     }
 
     override predicate definedByInitialValue(StackVariable lsv) {
@@ -464,10 +452,8 @@ module FlowVar_internal {
     }
 
     override string toString() {
-      exists(Expr e |
-        this.definedByExpr(e, _) and
-        result = "assignment to " + v
-      )
+      this.definedByExpr(_, _) and
+      result = "assignment to " + v
       or
       this.definedByInitialValue(_) and
       result = "initial value of " + v
@@ -488,7 +474,7 @@ module FlowVar_internal {
   }
 
   /** Type-specialized version of `getEnclosingElement`. */
-  private ControlFlowNode getCFNParent(ControlFlowNode node) { result = node.getEnclosingElement() }
+  private ControlFlowNode getCfnParent(ControlFlowNode node) { result = node.getEnclosingElement() }
 
   /**
    * A for-loop or while-loop whose condition is always true upon entry but not
@@ -540,7 +526,7 @@ module FlowVar_internal {
     }
 
     private predicate bbInLoopCondition(BasicBlock bb) {
-      getCFNParent*(bb.getANode()) = this.(Loop).getCondition()
+      getCfnParent*(bb.getANode()) = this.(Loop).getCondition()
     }
 
     private predicate bbInLoop(BasicBlock bb) {
@@ -563,7 +549,7 @@ module FlowVar_internal {
         bb = this.(Loop).getStmt() and
         v = this.getARelevantVariable()
         or
-        this.reachesWithoutAssignment(bb.getAPredecessor(), v) and
+        this.reachesWithoutAssignment(pragma[only_bind_out](bb.getAPredecessor()), v) and
         this.bbInLoop(bb)
       ) and
       not assignsToVar(bb, v)

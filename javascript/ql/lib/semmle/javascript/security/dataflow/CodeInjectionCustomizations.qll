@@ -17,9 +17,9 @@ module CodeInjection {
    */
   abstract class Sink extends DataFlow::Node {
     /**
-     * Gets the substitute for `X` in the message `User-provided value flows to X`.
+     * Gets the prefix for the message `X depends on a user-provided value.`.
      */
-    string getMessageSuffix() { result = "here and is interpreted as code" }
+    string getMessagePrefix() { result = "This code execution" }
   }
 
   /**
@@ -27,17 +27,22 @@ module CodeInjection {
    */
   abstract class Sanitizer extends DataFlow::Node { }
 
-  /** A source of remote user input, considered as a flow source for code injection. */
-  class RemoteFlowSourceAsSource extends Source {
-    RemoteFlowSourceAsSource() { this instanceof RemoteFlowSource }
-  }
+  /**
+   * DEPRECATED: Use `ActiveThreatModelSource` from Concepts instead!
+   */
+  deprecated class RemoteFlowSourceAsSource = ActiveThreatModelSourceAsSource;
+
+  /**
+   * An active threat-model source, considered as a flow source.
+   */
+  private class ActiveThreatModelSourceAsSource extends Source, ActiveThreatModelSource { }
 
   /**
    * An expression which may be interpreted as an AngularJS expression.
    */
   class AngularJSExpressionSink extends Sink, DataFlow::ValueNode {
     AngularJSExpressionSink() {
-      any(AngularJS::AngularJSCall call).interpretsArgumentAsCode(this.asExpr())
+      any(AngularJS::AngularJSCallNode call).interpretsArgumentAsCode(this)
     }
   }
 
@@ -51,8 +56,20 @@ module CodeInjection {
     }
   }
 
+  /** An expression parsed by the `gray-matter` library. */
+  class GrayMatterSink extends Sink {
+    GrayMatterSink() {
+      exists(API::CallNode call |
+        call = DataFlow::moduleImport("gray-matter").getACall() and
+        this = call.getArgument(0) and
+        // if the js/javascript engine is set, then we assume they are set to something safe.
+        not exists(call.getParameter(1).getMember("engines").getMember(["js", "javascript"]))
+      )
+    }
+  }
+
   /**
-   * A template tag occuring in JS code, viewed as a code injection sink.
+   * A template tag occurring in JS code, viewed as a code injection sink.
    */
   class TemplateTagInScriptSink extends Sink {
     TemplateTagInScriptSink() {
@@ -113,8 +130,8 @@ module CodeInjection {
       )
     }
 
-    override string getMessageSuffix() {
-      result = "here and is interpreted by " + templateType + ", which may evaluate it as code"
+    override string getMessagePrefix() {
+      result = "This " + templateType + " template, which may contain code,"
     }
   }
 
@@ -158,7 +175,7 @@ module CodeInjection {
         exists(string callName | c = DataFlow::globalVarRef(callName).getAnInvocation() |
           callName = "eval" and index = 0
           or
-          callName = "Function"
+          callName = "Function" and index = -1
           or
           callName = "execScript" and index = 0
           or
@@ -173,14 +190,13 @@ module CodeInjection {
           callName = "setImmediate" and index = 0
         )
         or
-        exists(DataFlow::GlobalVarRefNode wasm, string methodName |
-          wasm.getName() = "WebAssembly" and c = wasm.getAMemberCall(methodName)
-        |
-          methodName = "compile" or
-          methodName = "compileStreaming"
-        )
+        c = DataFlow::globalVarRef("WebAssembly").getAMemberCall(["compile", "compileStreaming"]) and
+        index = -1
       |
         this = c.getArgument(index)
+        or
+        index = -1 and
+        this = c.getAnArgument()
       )
       or
       // node-serialize is not intended to be safe for untrusted inputs
@@ -208,7 +224,7 @@ module CodeInjection {
    */
   class ReactScriptTag extends Sink {
     ReactScriptTag() {
-      exists(JSXElement element | element.getName() = "script" |
+      exists(JsxElement element | element.getName() = "script" |
         this = element.getBodyElement(_).flow()
       )
     }
@@ -223,7 +239,7 @@ module CodeInjection {
         def.getName().regexpMatch("(?i)on.+") and
         this = def.getValueNode() and
         // JSX event handlers are functions, not strings
-        not def instanceof JSXAttribute
+        not def instanceof JsxAttribute
       )
     }
   }
@@ -231,8 +247,8 @@ module CodeInjection {
   /**
    * A code operator of a NoSQL query as a code injection sink.
    */
-  class NoSQLCodeInjectionSink extends Sink {
-    NoSQLCodeInjectionSink() { any(NoSQL::Query q).getACodeOperator() = this }
+  class NoSqlCodeInjectionSink extends Sink {
+    NoSqlCodeInjectionSink() { any(NoSql::Query q).getACodeOperator() = this }
   }
 
   /**
@@ -252,11 +268,56 @@ module CodeInjection {
     }
   }
 
+  /**
+   * A system command execution of "node", where the executed code is seen as a code injection sink.
+   */
+  class NodeCallSink extends Sink {
+    NodeCallSink() {
+      exists(SystemCommandExecution s |
+        s.getACommandArgument().mayHaveStringValue("node")
+        or
+        s.getACommandArgument() =
+          DataFlow::globalVarRef("process").getAPropertyRead("argv").getAPropertyRead("0")
+      |
+        exists(DataFlow::SourceNode arr | arr = s.getArgumentList().getALocalSource() |
+          arr.getAPropertyWrite().getRhs().mayHaveStringValue("-e") and
+          this = arr.getAPropertyWrite().getRhs()
+        )
+      )
+    }
+  }
+
+  /**
+   * An execution of a terminal command via the `node-pty` library, seen as a code injection sink.
+   * Example:
+   * ```JS
+   * var pty = require('node-pty');
+   * var ptyProcess = pty.spawn("bash", [], {...});
+   * ptyProcess.write('ls\r');
+   * ```
+   */
+  class NodePty extends Sink {
+    NodePty() {
+      this =
+        API::moduleImport("node-pty")
+            .getMember("spawn")
+            .getReturn()
+            .getMember("write")
+            .getACall()
+            .getArgument(0)
+    }
+  }
+
+  /**
+   * A value interpreted as code by the `webix` library.
+   */
+  class WebixExec extends Sink {
+    WebixExec() { this = Webix::webix().getMember("exec").getParameter(0).asSink() }
+  }
+
   /** A sink for code injection via template injection. */
   abstract private class TemplateSink extends Sink {
-    override string getMessageSuffix() {
-      result = "here and is interpreted as a template, which may contain code"
-    }
+    override string getMessagePrefix() { result = "Template, which may contain code," }
   }
 
   /**
@@ -355,5 +416,26 @@ module CodeInjection {
     LodashUnderscoreTemplateSink() {
       this = LodashUnderscore::member("template").getACall().getArgument(0)
     }
+  }
+
+  /**
+   * A value interpreted as a template by the `webix` library.
+   */
+  class WebixTemplateSink extends TemplateSink {
+    WebixTemplateSink() {
+      this = Webix::webix().getMember("ui").getParameter(0).getMember("template").asSink()
+      or
+      this =
+        Webix::webix().getMember("ui").getParameter(0).getMember("template").getReturn().asSink()
+    }
+  }
+
+  /**
+   * A call to JSON.stringify() seen as a sanitizer.
+   */
+  class JsonStringifySanitizer extends Sanitizer, JsonStringifyCall { }
+
+  private class SinkFromModel extends Sink {
+    SinkFromModel() { this = ModelOutput::getASinkNode("code-injection").asSink() }
   }
 }

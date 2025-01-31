@@ -9,10 +9,10 @@
 
 import javascript
 import semmle.javascript.security.dataflow.StoredXssQuery
-import DataFlow::PathGraph
+import StoredXssFlow::PathGraph
 
 /**
- * Data returned from a MySQL query, such as the `data` parameter in this example:
+ * The data returned from a MySQL query, such as the `data` parameter in this example:
  * ```
  * let mysql = require('mysql');
  * let connection = mysql.createConnection();
@@ -31,6 +31,6 @@ class MysqlSource extends Source {
   }
 }
 
-from Configuration cfg, DataFlow::PathNode source, DataFlow::PathNode sink
-where cfg.hasFlowPath(source, sink)
+from StoredXssFlow::PathNode source, StoredXssFlow::PathNode sink
+where StoredXssFlow::flowPath(source, sink)
 select sink.getNode(), source, sink, "Stored XSS from $@.", source.getNode(), "database value."

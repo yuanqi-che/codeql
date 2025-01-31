@@ -35,9 +35,7 @@ private module Console {
   private class ConsoleGlobalEntry extends API::EntryPoint {
     ConsoleGlobalEntry() { this = "ConsoleGlobalEntry" }
 
-    override DataFlow::SourceNode getAUse() { result = DataFlow::globalVarRef("console") }
-
-    override DataFlow::Node getARhs() { none() }
+    override DataFlow::SourceNode getASource() { result = DataFlow::globalVarRef("console") }
   }
 
   /**
@@ -45,7 +43,7 @@ private module Console {
    */
   private API::Node console() {
     result = API::moduleImport("console") or
-    result = any(ConsoleGlobalEntry e).getNode()
+    result = any(ConsoleGlobalEntry e).getANode()
   }
 
   /**
@@ -65,11 +63,11 @@ private module Console {
     override DataFlow::Node getAMessageComponent() {
       (
         if name = "assert"
-        then result = getArgument([1 .. getNumArgument()])
-        else result = getAnArgument()
+        then result = this.getArgument([1 .. this.getNumArgument()])
+        else result = this.getAnArgument()
       )
       or
-      result = getASpreadArgument()
+      result = this.getASpreadArgument()
     }
 
     /**
@@ -91,7 +89,7 @@ private module Loglevel {
       this = API::moduleImport("loglevel").getMember(getAStandardLoggerMethodName()).getACall()
     }
 
-    override DataFlow::Node getAMessageComponent() { result = getAnArgument() }
+    override DataFlow::Node getAMessageComponent() { result = this.getAnArgument() }
   }
 }
 
@@ -113,9 +111,9 @@ private module Winston {
     }
 
     override DataFlow::Node getAMessageComponent() {
-      if getMethodName() = "log"
-      then result = getOptionArgument(0, "message")
-      else result = getAnArgument()
+      if this.getMethodName() = "log"
+      then result = this.getOptionArgument(0, "message")
+      else result = this.getAnArgument()
     }
   }
 }
@@ -123,7 +121,7 @@ private module Winston {
 /**
  * Provides classes for working with [log4js](https://github.com/log4js-node/log4js-node).
  */
-private module log4js {
+private module Log4js {
   /**
    * A call to the log4js logging mechanism.
    */
@@ -137,7 +135,7 @@ private module log4js {
             .getACall()
     }
 
-    override DataFlow::Node getAMessageComponent() { result = getAnArgument() }
+    override DataFlow::Node getAMessageComponent() { result = this.getAnArgument() }
   }
 }
 
@@ -159,11 +157,11 @@ private module Npmlog {
     override DataFlow::Node getAMessageComponent() {
       (
         if name = "log"
-        then result = getArgument([1 .. getNumArgument()])
-        else result = getAnArgument()
+        then result = this.getArgument([1 .. this.getNumArgument()])
+        else result = this.getAnArgument()
       )
       or
-      result = getASpreadArgument()
+      result = this.getASpreadArgument()
     }
   }
 }
@@ -181,17 +179,17 @@ private module Fancylog {
       this = API::moduleImport("fancy-log").getACall()
     }
 
-    override DataFlow::Node getAMessageComponent() { result = getAnArgument() }
+    override DataFlow::Node getAMessageComponent() { result = this.getAnArgument() }
   }
 }
 
 /**
- * A class modelling [debug](https://npmjs.org/package/debug) as a logging mechanism.
+ * A class modeling [debug](https://npmjs.org/package/debug) as a logging mechanism.
  */
 private class DebugLoggerCall extends LoggerCall, API::CallNode {
   DebugLoggerCall() { this = API::moduleImport("debug").getReturn().getACall() }
 
-  override DataFlow::Node getAMessageComponent() { result = getAnArgument() }
+  override DataFlow::Node getAMessageComponent() { result = this.getAnArgument() }
 }
 
 /**
@@ -295,11 +293,11 @@ class KleurStep extends TaintTracking::SharedTaintStep {
   private API::Node kleurInstance() {
     result = API::moduleImport("kleur")
     or
-    result = kleurInstance().getAMember().getReturn()
+    result = this.kleurInstance().getAMember().getReturn()
   }
 
   override predicate stringManipulationStep(DataFlow::Node pred, DataFlow::Node succ) {
-    exists(API::CallNode call | call = kleurInstance().getAMember().getACall() |
+    exists(API::CallNode call | call = this.kleurInstance().getAMember().getACall() |
       pred = call.getArgument(0) and
       succ = call
     )
@@ -351,8 +349,8 @@ private module Pino {
     or
     // `pino` is installed as the "log" property on the request object in `Express` and similar libraries.
     // in `Hapi` the property is "logger".
-    exists(HTTP::RequestExpr req, API::Node reqNode |
-      reqNode.getAnImmediateUse() = req.flow().getALocalSource() and
+    exists(Http::RequestNode req, API::Node reqNode |
+      reqNode.asSource() = req.getALocalSource() and
       result = reqNode.getMember(["log", "logger"])
     )
   }
@@ -365,7 +363,7 @@ private module Pino {
       this = pino().getMember(["trace", "debug", "info", "warn", "error", "fatal"]).getACall()
     }
 
-    override DataFlow::Node getAMessageComponent() { result = getAnArgument() }
+    override DataFlow::Node getAMessageComponent() { result = this.getAnArgument() }
   }
 }
 

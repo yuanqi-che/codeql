@@ -5,8 +5,8 @@ private import Imports::OperandTag
 private import Imports::Overlap
 private import Imports::TInstruction
 private import Imports::RawIR as RawIR
-private import SSAInstructions
-private import SSAOperands
+private import SsaInstructions
+private import SsaOperands
 private import NewIR
 
 private class OldBlock = Reachability::ReachableBlock;
@@ -14,6 +14,51 @@ private class OldBlock = Reachability::ReachableBlock;
 private class OldInstruction = Reachability::ReachableInstruction;
 
 import Cached
+
+/**
+ * Holds if `instruction` is the first instruction that may be followed by
+ * an `UninitializedGroup` instruction, and the enclosing function of
+ * `instruction` is `func`.
+ */
+private predicate isFirstInstructionBeforeUninitializedGroup(
+  Instruction instruction, IRFunction func
+) {
+  instruction = getChi(any(OldIR::InitializeNonLocalInstruction init)) and
+  func = instruction.getEnclosingIRFunction()
+}
+
+/** Gets the `i`'th `UninitializedGroup` instruction in `func`. */
+private UninitializedGroupInstruction getInitGroupInstruction(int i, IRFunction func) {
+  exists(Alias::VariableGroup vg |
+    vg.getIRFunction() = func and
+    vg.getInitializationOrder() = i and
+    result = uninitializedGroup(vg)
+  )
+}
+
+/**
+ * Holds if `instruction` is the last instruction in the chain of `UninitializedGroup`
+ * instructions in `func`. The chain of instructions may be empty in which case
+ * `instruction` satisfies
+ * ```
+ * isFirstInstructionBeforeUninitializedGroup(instruction, func)
+ * ```
+ */
+predicate isLastInstructionForUninitializedGroups(Instruction instruction, IRFunction func) {
+  exists(int i |
+    instruction = getInitGroupInstruction(i, func) and
+    not exists(getChi(instruction)) and
+    not exists(getInitGroupInstruction(i + 1, func))
+  )
+  or
+  exists(int i |
+    instruction = getChi(getInitGroupInstruction(i, func)) and
+    not exists(getInitGroupInstruction(i + 1, func))
+  )
+  or
+  isFirstInstructionBeforeUninitializedGroup(instruction, func) and
+  not exists(getInitGroupInstruction(0, func))
+}
 
 cached
 private module Cached {
@@ -33,15 +78,25 @@ private module Cached {
   }
 
   cached
+  predicate hasChiNodeAfterUninitializedGroup(UninitializedGroupInstruction initGroup) {
+    hasChiNodeAfterUninitializedGroup(_, initGroup)
+  }
+
+  cached
   predicate hasUnreachedInstructionCached(IRFunction irFunc) {
-    exists(OldInstruction oldInstruction |
+    exists(OldIR::Instruction oldInstruction |
       irFunc = oldInstruction.getEnclosingIRFunction() and
-      Reachability::isInfeasibleInstructionSuccessor(oldInstruction, _)
+      (
+        Reachability::isInfeasibleInstructionSuccessor(oldInstruction, _)
+        or
+        oldInstruction.getOpcode() instanceof Opcode::Unreached
+      )
     )
   }
 
   class TStageInstruction =
-    TRawInstruction or TPhiInstruction or TChiInstruction or TUnreachedInstruction;
+    TRawInstruction or TPhiInstruction or TChiInstruction or TUnreachedInstruction or
+        TUninitializedGroupInstruction;
 
   /**
    * If `oldInstruction` is a `Phi` instruction that has exactly one reachable predecessor block,
@@ -64,7 +119,7 @@ private module Cached {
     or
     instr = reusedPhiInstruction(_) and
     // Check that the phi instruction is *not* degenerate, but we can't use
-    // getDegeneratePhiOperand in the first stage with phi instyructions
+    // getDegeneratePhiOperand in the first stage with phi instructions
     not exists(
       unique(OldIR::PhiInputOperand operand |
         operand = instr.(OldIR::PhiInstruction).getAnInputOperand() and
@@ -73,6 +128,8 @@ private module Cached {
     )
     or
     instr instanceof TChiInstruction
+    or
+    instr instanceof TUninitializedGroupInstruction
     or
     instr instanceof TUnreachedInstruction
   }
@@ -112,14 +169,15 @@ private module Cached {
     exists(Alias::getResultMemoryLocation(oldInstruction))
     or
     // This result was already modeled by a previous iteration of SSA.
-    Alias::canReuseSSAForOldResult(oldInstruction)
+    Alias::canReuseSsaForOldResult(oldInstruction)
   }
 
   cached
   predicate hasModeledMemoryResult(Instruction instruction) {
     canModelResultForOldInstruction(getOldInstruction(instruction)) or
     instruction instanceof PhiInstruction or // Phis always have modeled results
-    instruction instanceof ChiInstruction // Chis always have modeled results
+    instruction instanceof ChiInstruction or // Chis always have modeled results
+    instruction instanceof UninitializedGroupInstruction // Group initializers always have modeled results
   }
 
   cached
@@ -130,26 +188,23 @@ private module Cached {
     or
     // Chi instructions track virtual variables, and therefore a chi instruction is
     // conflated if it's associated with the aliased virtual variable.
-    exists(OldInstruction oldInstruction | instruction = getChi(oldInstruction) |
-      Alias::getResultMemoryLocation(oldInstruction).getVirtualVariable() instanceof
+    exists(Instruction input | instruction = getChi(input) |
+      Alias::getResultMemoryLocation(input).getVirtualVariable() instanceof
         Alias::AliasedVirtualVariable
+      or
+      // A chi following an `UninitializedGroupInstruction` only happens when the virtual
+      // variable of the grouped memory location is `{AllAliasedMemory}`.
+      exists(Alias::GroupedMemoryLocation gml |
+        input = uninitializedGroup(gml.getGroup()) and
+        gml.getVirtualVariable() instanceof Alias::AliasedVirtualVariable
+      )
     )
     or
     // Phi instructions track locations, and therefore a phi instruction is
     // conflated if it's associated with a conflated location.
     exists(Alias::MemoryLocation location |
       instruction = getPhi(_, location) and
-      not exists(location.getAllocation())
-    )
-  }
-
-  cached
-  Instruction getRegisterOperandDefinition(Instruction instruction, RegisterOperandTag tag) {
-    exists(OldInstruction oldInstruction, OldIR::RegisterOperand oldOperand |
-      oldInstruction = getOldInstruction(instruction) and
-      oldOperand = oldInstruction.getAnOperand() and
-      tag = oldOperand.getOperandTag() and
-      result = getNewInstruction(oldOperand.getAnyDef())
+      not exists(location.getAnAllocation())
     )
   }
 
@@ -182,7 +237,7 @@ private module Cached {
    * unreachable, this predicate will recurse through any degenerate `Phi` instructions to find the
    * true definition.
    */
-  private Instruction getNewDefinitionFromOldSSA(OldIR::MemoryOperand oldOperand, Overlap overlap) {
+  private Instruction getNewDefinitionFromOldSsa(OldIR::MemoryOperand oldOperand, Overlap overlap) {
     exists(Overlap originalOverlap |
       originalOverlap = oldOperand.getDefinitionOverlap() and
       (
@@ -191,7 +246,7 @@ private module Cached {
         or
         exists(OldIR::PhiInputOperand phiOperand, Overlap phiOperandOverlap |
           phiOperand = getDegeneratePhiOperand(oldOperand.getAnyDef()) and
-          result = getNewDefinitionFromOldSSA(phiOperand, phiOperandOverlap) and
+          result = getNewDefinitionFromOldSsa(phiOperand, phiOperandOverlap) and
           overlap =
             combineOverlap(pragma[only_bind_out](phiOperandOverlap),
               pragma[only_bind_out](originalOverlap))
@@ -211,7 +266,11 @@ private module Cached {
       hasMemoryOperandDefinition(oldInstruction, oldOperand, overlap, result)
     )
     or
-    instruction = getChi(getOldInstruction(result)) and
+    (
+      instruction = getChi(getOldInstruction(result))
+      or
+      instruction = getChi(result.(UninitializedGroupInstruction))
+    ) and
     tag instanceof ChiPartialOperandTag and
     overlap instanceof MustExactlyOverlap
     or
@@ -233,23 +292,9 @@ private module Cached {
     )
     or
     exists(OldIR::NonPhiMemoryOperand oldOperand |
-      result = getNewDefinitionFromOldSSA(oldOperand, overlap) and
+      result = getNewDefinitionFromOldSsa(oldOperand, overlap) and
       oldOperand.getUse() = instruction and
       tag = oldOperand.getOperandTag()
-    )
-  }
-
-  /**
-   * Holds if the partial operand of this `ChiInstruction` updates the bit range
-   * `[startBitOffset, endBitOffset)` of the total operand.
-   */
-  cached
-  predicate getIntervalUpdatedByChi(ChiInstruction chi, int startBitOffset, int endBitOffset) {
-    exists(Alias::MemoryLocation location, OldInstruction oldInstruction |
-      oldInstruction = getOldInstruction(chi.getPartial()) and
-      location = Alias::getResultMemoryLocation(oldInstruction) and
-      startBitOffset = Alias::getStartBitOffset(location) and
-      endBitOffset = Alias::getEndBitOffset(location)
     )
   }
 
@@ -283,6 +328,14 @@ private module Cached {
     )
   }
 
+  cached
+  IRVariable getAnUninitializedGroupVariable(UninitializedGroupInstruction init) {
+    exists(Alias::VariableGroup vg |
+      init = uninitializedGroup(vg) and
+      result = vg.getAnAllocation().getABaseInstruction().(VariableInstruction).getIRVariable()
+    )
+  }
+
   /**
    * Holds if `instr` is part of a cycle in the operand graph that doesn't go
    * through a phi instruction and therefore should be impossible.
@@ -307,13 +360,13 @@ private module Cached {
    * Gets the new definition instruction for the operand of `instr` that flows from the block
    * `newPredecessorBlock`, based on that operand's definition in the old IR.
    */
-  private Instruction getNewPhiOperandDefinitionFromOldSSA(
+  private Instruction getNewPhiOperandDefinitionFromOldSsa(
     Instruction instr, IRBlock newPredecessorBlock, Overlap overlap
   ) {
     exists(OldIR::PhiInstruction oldPhi, OldIR::PhiInputOperand oldOperand |
       oldPhi = getOldInstruction(instr) and
       oldOperand = oldPhi.getInputOperand(getOldBlock(newPredecessorBlock)) and
-      result = getNewDefinitionFromOldSSA(oldOperand, overlap)
+      result = getNewDefinitionFromOldSsa(oldOperand, overlap)
     )
   }
 
@@ -333,21 +386,47 @@ private module Cached {
       overlap = Alias::getOverlap(actualDefLocation, useLocation)
     )
     or
-    result = getNewPhiOperandDefinitionFromOldSSA(instr, newPredecessorBlock, overlap)
+    result = getNewPhiOperandDefinitionFromOldSsa(instr, newPredecessorBlock, overlap)
+  }
+
+  private ChiInstruction getChiAfterUninitializedGroup(int i, IRFunction func) {
+    result =
+      rank[i + 1](VariableGroup vg, UninitializedGroupInstruction initGroup, ChiInstruction chi,
+        int r |
+        initGroup.getEnclosingIRFunction() = func and
+        chi = getChi(initGroup) and
+        initGroup = uninitializedGroup(vg) and
+        r = vg.getInitializationOrder()
+      |
+        chi order by r
+      )
   }
 
   cached
   Instruction getChiInstructionTotalOperand(ChiInstruction chiInstr) {
     exists(
-      Alias::VirtualVariable vvar, OldInstruction oldInstr, Alias::MemoryLocation defLocation,
-      OldBlock defBlock, int defRank, int defOffset, OldBlock useBlock, int useRank
+      Alias::VirtualVariable vvar, OldInstruction oldInstr, OldBlock defBlock, int defRank,
+      int defOffset, OldBlock useBlock, int useRank
     |
       chiInstr = getChi(oldInstr) and
       vvar = Alias::getResultMemoryLocation(oldInstr).getVirtualVariable() and
-      hasDefinitionAtRank(vvar, defLocation, defBlock, defRank, defOffset) and
+      hasDefinitionAtRank(vvar, _, defBlock, defRank, defOffset) and
       hasUseAtRank(vvar, useBlock, useRank, oldInstr) and
       definitionReachesUse(vvar, defBlock, defRank, useBlock, useRank) and
       result = getDefinitionOrChiInstruction(defBlock, defOffset, vvar, _)
+    )
+    or
+    exists(UninitializedGroupInstruction initGroup, IRFunction func |
+      chiInstr = getChi(initGroup) and
+      func = initGroup.getEnclosingIRFunction()
+    |
+      chiInstr = getChiAfterUninitializedGroup(0, func) and
+      isFirstInstructionBeforeUninitializedGroup(result, func)
+      or
+      exists(int i |
+        chiInstr = getChiAfterUninitializedGroup(i + 1, func) and
+        result = getChiAfterUninitializedGroup(i, func)
+      )
     )
   }
 
@@ -364,33 +443,158 @@ private module Cached {
     )
   }
 
-  /*
-   * This adds Chi nodes to the instruction successor relation; if an instruction has a Chi node,
-   * that node is its successor in the new successor relation, and the Chi node's successors are
-   * the new instructions generated from the successors of the old instruction
-   */
+  private UninitializedGroupInstruction firstInstructionToUninitializedGroup(
+    Instruction instruction, EdgeKind kind
+  ) {
+    exists(IRFunction func |
+      isFirstInstructionBeforeUninitializedGroup(instruction, func) and
+      result = getInitGroupInstruction(0, func) and
+      kind instanceof GotoEdge
+    )
+  }
 
-  cached
-  Instruction getInstructionSuccessor(Instruction instruction, EdgeKind kind) {
+  private Instruction getNextUninitializedGroupInstruction(Instruction instruction, EdgeKind kind) {
+    exists(int i, IRFunction func |
+      func = instruction.getEnclosingIRFunction() and
+      instruction = getInitGroupInstruction(i, func) and
+      kind instanceof GotoEdge
+    |
+      if hasChiNodeAfterUninitializedGroup(_, instruction)
+      then result = getChi(instruction)
+      else result = getInitGroupInstruction(i + 1, func)
+    )
+    or
+    exists(int i, IRFunction func, UninitializedGroupInstruction initGroup |
+      func = instruction.getEnclosingIRFunction() and
+      instruction = getChi(initGroup) and
+      initGroup = getInitGroupInstruction(i, func) and
+      kind instanceof GotoEdge
+    |
+      result = getInitGroupInstruction(i + 1, func)
+    )
+  }
+
+  private Instruction getInstructionSuccessorAfterUninitializedGroup0(
+    Instruction instruction, EdgeKind kind
+  ) {
     if hasChiNode(_, getOldInstruction(instruction))
     then
       result = getChi(getOldInstruction(instruction)) and
       kind instanceof GotoEdge
-    else (
+    else
       exists(OldInstruction oldInstruction |
-        oldInstruction = getOldInstruction(instruction) and
+        (
+          oldInstruction = getOldInstruction(instruction)
+          or
+          instruction = getChi(oldInstruction)
+        ) and
         (
           if Reachability::isInfeasibleInstructionSuccessor(oldInstruction, kind)
           then result = unreachedInstruction(instruction.getEnclosingIRFunction())
           else result = getNewInstruction(oldInstruction.getSuccessor(kind))
         )
       )
-      or
-      exists(OldInstruction oldInstruction |
-        instruction = getChi(oldInstruction) and
-        result = getNewInstruction(oldInstruction.getSuccessor(kind))
-      )
+  }
+
+  private Instruction getInstructionSuccessorAfterUninitializedGroup(
+    Instruction instruction, EdgeKind kind
+  ) {
+    exists(IRFunction func, Instruction firstBeforeUninitializedGroup |
+      isLastInstructionForUninitializedGroups(instruction, func) and
+      isFirstInstructionBeforeUninitializedGroup(firstBeforeUninitializedGroup, func) and
+      result = getInstructionSuccessorAfterUninitializedGroup0(firstBeforeUninitializedGroup, kind)
     )
+  }
+
+  /**
+   * This adds Chi nodes to the instruction successor relation; if an instruction has a Chi node,
+   * that node is its successor in the new successor relation, and the Chi node's successors are
+   * the new instructions generated from the successors of the old instruction.
+   *
+   * Furthermore, the entry block is augmented with `UninitializedGroup` instructions and `Chi`
+   * instructions. For example, consider this example:
+   * ```cpp
+   * int x, y;
+   * int* p;
+   * if(b) {
+   *   p = &x;
+   *   escape(&x);
+   * } else {
+   *   p = &y;
+   * }
+   * *p = 42;
+   *
+   * int z, w;
+   * int* q;
+   * if(b) {
+   *   q = &z;
+   * } else {
+   *   q = &w;
+   * }
+   * *q = 43;
+   * ```
+   *
+   * the unaliased IR for the entry block of this snippet is:
+   * ```
+   * v1(void)         = EnterFunction          :
+   * m1(unknown)      = AliasedDefinition      :
+   * m2(unknown)      = InitializeNonLocal     :
+   * r1(glval<bool>)  = VariableAddress[b]     :
+   * m3(bool)         = InitializeParameter[b] : &:r1
+   * r2(glval<int>)   = VariableAddress[x]     :
+   * m4(int)          = Uninitialized[x]       : &:r2
+   * r3(glval<int>)   = VariableAddress[y]     :
+   * m5(int)          = Uninitialized[y]       : &:r3
+   * r4(glval<int *>) = VariableAddress[p]     :
+   * m6(int *)        = Uninitialized[p]       : &:r4
+   * r5(glval<bool>)  = VariableAddress[b]     :
+   * r6(bool)         = Load[b]                : &:r5, m3
+   * v2(void)         = ConditionalBranch      : r6
+   * ```
+   * and we need to transform this to aliased IR by inserting an `UninitializedGroup`
+   * instruction for every `VariableGroup` memory location in the function. Furthermore,
+   * if the `VariableGroup` memory location contains an allocation that escapes we need
+   * to insert a `Chi` that writes the memory produced by `UninitializedGroup` into
+   * `{AllAliasedMemory}`. For the above snippet we then end up with:
+   * ```
+   * v1(void)         = EnterFunction           :
+   * m2(unknown)      = AliasedDefinition       :
+   * m3(unknown)      = InitializeNonLocal      :
+   * m4(unknown)      = Chi                     : total:m2, partial:m3
+   * m5(int)          = UninitializedGroup[x,y] :
+   * m6(unknown)      = Chi                     : total:m4, partial:m5
+   * m7(int)          = UninitializedGroup[w,z] :
+   * r1(glval<bool>)  = VariableAddress[b]      :
+   * m8(bool)         = InitializeParameter[b]  : &:r1
+   * r2(glval<int>)   = VariableAddress[x]      :
+   * m10(int)         = Uninitialized[x]       : &:r2
+   * m11(unknown)     = Chi                    : total:m6, partial:m10
+   * r3(glval<int>)   = VariableAddress[y]      :
+   * m12(int)         = Uninitialized[y]       : &:r3
+   * m13(unknown)     = Chi                    : total:m11, partial:m12
+   * r4(glval<int *>) = VariableAddress[p]      :
+   * m14(int *)       = Uninitialized[p]       : &:r4
+   * r5(glval<bool>)  = VariableAddress[b]      :
+   * r6(bool)         = Load[b]                 : &:r5, m8
+   * v2(void)         = ConditionalBranch       : r6
+   * ```
+   *
+   * Here, the group `{x, y}` contains an allocation that escapes (`x`), so there
+   * is a `Chi` after the `UninitializedGroup` that initializes the memory for the
+   * `VariableGroup` containing `x`. None of the allocations in `{w, z}` escape so
+   * there is no `Chi` following that the `UninitializedGroup` that initializes the
+   * memory of `{w, z}`.
+   */
+  cached
+  Instruction getInstructionSuccessor(Instruction instruction, EdgeKind kind) {
+    result = firstInstructionToUninitializedGroup(instruction, kind)
+    or
+    result = getNextUninitializedGroupInstruction(instruction, kind)
+    or
+    result = getInstructionSuccessorAfterUninitializedGroup(instruction, kind)
+    or
+    not isFirstInstructionBeforeUninitializedGroup(instruction, _) and
+    result = getInstructionSuccessorAfterUninitializedGroup0(instruction, kind)
   }
 
   cached
@@ -412,21 +616,31 @@ private module Cached {
   }
 
   cached
-  Language::AST getInstructionAST(Instruction instr) {
-    result = getOldInstruction(instr).getAST()
+  Language::AST getInstructionAst(Instruction instr) {
+    result = getOldInstruction(instr).getAst()
     or
     exists(RawIR::Instruction blockStartInstr |
       instr = phiInstruction(blockStartInstr, _) and
-      result = blockStartInstr.getAST()
+      result = blockStartInstr.getAst()
     )
     or
     exists(RawIR::Instruction primaryInstr |
       instr = chiInstruction(primaryInstr) and
-      result = primaryInstr.getAST()
+      result = primaryInstr.getAst()
     )
     or
     exists(IRFunctionBase irFunc |
       instr = unreachedInstruction(irFunc) and result = irFunc.getFunction()
+    )
+    or
+    exists(Alias::VariableGroup vg |
+      instr = uninitializedGroup(vg) and
+      result = vg.getIRFunction().getFunction()
+    )
+    or
+    exists(UninitializedGroupInstruction initGroup |
+      instr = chiInstruction(initGroup) and
+      result = getInstructionAst(initGroup)
     )
   }
 
@@ -440,15 +654,27 @@ private module Cached {
     )
     or
     exists(Instruction primaryInstr, Alias::VirtualVariable vvar |
-      instr = chiInstruction(primaryInstr) and
-      hasChiNode(vvar, primaryInstr) and
-      result = vvar.getType()
+      instr = chiInstruction(primaryInstr) and result = vvar.getType()
+    |
+      hasChiNode(vvar, primaryInstr)
+      or
+      hasChiNodeAfterUninitializedGroup(vvar, primaryInstr)
+    )
+    or
+    exists(Alias::VariableGroup vg |
+      instr = uninitializedGroup(vg) and
+      result = vg.getType()
     )
     or
     instr = reusedPhiInstruction(_) and
     result = instr.(OldInstruction).getResultLanguageType()
     or
     instr = unreachedInstruction(_) and result = Language::getVoidType()
+  }
+
+  cached
+  IRType getInstructionResultIRType(Instruction instr) {
+    result = instr.getResultLanguageType().getIRType()
   }
 
   /**
@@ -465,6 +691,8 @@ private module Cached {
     or
     instr = chiInstruction(_) and opcode instanceof Opcode::Chi
     or
+    instr = uninitializedGroup(_) and opcode instanceof Opcode::UninitializedGroup
+    or
     instr = unreachedInstruction(_) and opcode instanceof Opcode::Unreached
   }
 
@@ -477,8 +705,13 @@ private module Cached {
       result = blockStartInstr.getEnclosingIRFunction()
     )
     or
-    exists(OldInstruction primaryInstr |
+    exists(Instruction primaryInstr |
       instr = chiInstruction(primaryInstr) and result = primaryInstr.getEnclosingIRFunction()
+    )
+    or
+    exists(Alias::VariableGroup vg |
+      instr = uninitializedGroup(vg) and
+      result = vg.getIRFunction()
     )
     or
     instr = unreachedInstruction(result)
@@ -495,6 +728,8 @@ private module Cached {
       instruction = getChi(oldInstruction) and
       result = getNewInstruction(oldInstruction)
     )
+    or
+    instruction = getChi(result.(UninitializedGroupInstruction))
   }
 }
 
@@ -502,7 +737,7 @@ private Instruction getNewInstruction(OldInstruction instr) { getOldInstruction(
 
 private OldInstruction getOldInstruction(Instruction instr) { instr = result }
 
-private ChiInstruction getChi(OldInstruction primaryInstr) { result = chiInstruction(primaryInstr) }
+private ChiInstruction getChi(Instruction primaryInstr) { result = chiInstruction(primaryInstr) }
 
 private PhiInstruction getPhi(OldBlock defBlock, Alias::MemoryLocation defLocation) {
   result = phiInstruction(defBlock.getFirstInstruction(), defLocation)
@@ -519,6 +754,16 @@ private predicate hasChiNode(Alias::VirtualVariable vvar, OldInstruction def) {
     defLocation.getVirtualVariable() = vvar and
     // If the definition totally (or exactly) overlaps the virtual variable, then there's no need for a `Chi`
     // instruction.
+    Alias::getOverlap(defLocation, vvar) instanceof MayPartiallyOverlap
+  )
+}
+
+private predicate hasChiNodeAfterUninitializedGroup(
+  Alias::AliasedVirtualVariable vvar, UninitializedGroupInstruction initGroup
+) {
+  exists(Alias::GroupedMemoryLocation defLocation |
+    initGroup = uninitializedGroup(defLocation.getGroup()) and
+    defLocation.getVirtualVariable() = vvar and
     Alias::getOverlap(defLocation, vvar) instanceof MayPartiallyOverlap
   )
 }
@@ -685,19 +930,37 @@ private import DefUse
  * potentially very sparse.
  */
 module DefUse {
+  bindingset[index, block]
+  pragma[inline_late]
+  private int getNonChiOffset(int index, OldBlock block) {
+    exists(OldIR::IRFunction func, Instruction i, OldBlock entryBlock |
+      func = block.getEnclosingIRFunction() and
+      i = block.getInstruction(index) and
+      entryBlock = func.getEntryBlock()
+    |
+      if
+        block = entryBlock and
+        not i instanceof InitializeNonLocalInstruction and
+        not i instanceof AliasedDefinitionInstruction
+      then result = 2 * (index + count(VariableGroup vg | vg.getIRFunction() = func))
+      else result = 2 * index
+    )
+  }
+
+  bindingset[index, block]
+  pragma[inline_late]
+  private int getChiOffset(int index, OldBlock block) { result = getNonChiOffset(index, block) + 1 }
+
   /**
    * Gets the `Instruction` for the definition at offset `defOffset` in block `defBlock`.
    */
-  Instruction getDefinitionOrChiInstruction(
+  private Instruction getDefinitionOrChiInstruction0(
     OldBlock defBlock, int defOffset, Alias::MemoryLocation defLocation,
     Alias::MemoryLocation actualDefLocation
   ) {
-    exists(OldInstruction oldInstr, int oldOffset |
-      oldInstr = defBlock.getInstruction(oldOffset) and
-      oldOffset >= 0
-    |
+    exists(OldInstruction oldInstr, int oldOffset | oldInstr = defBlock.getInstruction(oldOffset) |
       // An odd offset corresponds to the `Chi` instruction.
-      defOffset = oldOffset * 2 + 1 and
+      defOffset = getChiOffset(oldOffset, defBlock) and
       result = getChi(oldInstr) and
       (
         defLocation = Alias::getResultMemoryLocation(oldInstr) or
@@ -706,7 +969,7 @@ module DefUse {
       actualDefLocation = defLocation.getVirtualVariable()
       or
       // An even offset corresponds to the original instruction.
-      defOffset = oldOffset * 2 and
+      defOffset = getNonChiOffset(oldOffset, defBlock) and
       result = getNewInstruction(oldInstr) and
       (
         defLocation = Alias::getResultMemoryLocation(oldInstr) or
@@ -719,10 +982,58 @@ module DefUse {
     hasDefinition(_, defLocation, defBlock, defOffset) and
     result = getPhi(defBlock, defLocation) and
     actualDefLocation = defLocation
+    or
+    exists(
+      Alias::VariableGroup vg, int index, UninitializedGroupInstruction initGroup,
+      Alias::GroupedMemoryLocation gml
+    |
+      // Add 3 to account for the function prologue:
+      // v1(void)    = EnterFunction
+      // m1(unknown) = AliasedDefinition
+      // m2(unknown) = InitializeNonLocal
+      index = 3 + vg.getInitializationOrder() and
+      not gml.isMayAccess() and
+      gml.isSome() and
+      gml.getGroup() = vg and
+      vg.getIRFunction().getEntryBlock() = defBlock and
+      initGroup = uninitializedGroup(vg) and
+      (defLocation = gml or defLocation = gml.getVirtualVariable())
+    |
+      result = initGroup and
+      defOffset = 2 * index and
+      actualDefLocation = defLocation
+      or
+      result = getChi(initGroup) and
+      defOffset = 2 * index + 1 and
+      actualDefLocation = defLocation.getVirtualVariable()
+    )
+  }
+
+  private ChiInstruction remapGetDefinitionOrChiInstruction(Instruction oldResult) {
+    exists(IRFunction func |
+      isFirstInstructionBeforeUninitializedGroup(oldResult, func) and
+      isLastInstructionForUninitializedGroups(result, func)
+    )
+  }
+
+  Instruction getDefinitionOrChiInstruction(
+    OldBlock defBlock, int defOffset, Alias::MemoryLocation defLocation,
+    Alias::MemoryLocation actualDefLocation
+  ) {
+    exists(Instruction oldResult |
+      oldResult =
+        getDefinitionOrChiInstruction0(defBlock, defOffset, defLocation, actualDefLocation) and
+      (
+        result = remapGetDefinitionOrChiInstruction(oldResult)
+        or
+        not exists(remapGetDefinitionOrChiInstruction(oldResult)) and
+        result = oldResult
+      )
+    )
   }
 
   /**
-   * Gets the rank index of a hyphothetical use one instruction past the end of
+   * Gets the rank index of a hypothetical use one instruction past the end of
    * the block. This index can be used to determine if a definition reaches the
    * end of the block, even if the definition is the last instruction in the
    * block.
@@ -859,8 +1170,20 @@ module DefUse {
       block.getInstruction(index) = def and
       overlap = Alias::getOverlap(defLocation, useLocation) and
       if overlap instanceof MayPartiallyOverlap
-      then offset = (index * 2) + 1 // The use will be connected to the definition on the `Chi` instruction.
-      else offset = index * 2 // The use will be connected to the definition on the original instruction.
+      then offset = getChiOffset(index, block) // The use will be connected to the definition on the `Chi` instruction.
+      else offset = getNonChiOffset(index, block) // The use will be connected to the definition on the original instruction.
+    )
+    or
+    exists(UninitializedGroupInstruction initGroup, int index, Overlap overlap, VariableGroup vg |
+      initGroup.getEnclosingIRFunction().getEntryBlock() = getNewBlock(block) and
+      vg = defLocation.(Alias::GroupedMemoryLocation).getGroup() and
+      // EnterFunction + AliasedDefinition + InitializeNonLocal + index
+      index = 3 + vg.getInitializationOrder() and
+      initGroup = uninitializedGroup(vg) and
+      overlap = Alias::getOverlap(defLocation, useLocation) and
+      if overlap instanceof MayPartiallyOverlap and hasChiNodeAfterUninitializedGroup(initGroup)
+      then offset = 2 * index + 1 // The use will be connected to the definition on the `Chi` instruction.
+      else offset = 2 * index // The use will be connected to the definition on the original instruction.
     )
   }
 
@@ -921,10 +1244,11 @@ module DefUse {
       block.getInstruction(index) = use and
       (
         // A direct use of the location.
-        useLocation = Alias::getOperandMemoryLocation(use.getAnOperand()) and offset = index * 2
+        useLocation = Alias::getOperandMemoryLocation(use.getAnOperand()) and
+        offset = getNonChiOffset(index, block)
         or
         // A `Chi` instruction will include a use of the virtual variable.
-        hasChiNode(useLocation, use) and offset = (index * 2) + 1
+        hasChiNode(useLocation, use) and offset = getChiOffset(index, block)
       )
     )
   }
@@ -975,31 +1299,31 @@ module DefUse {
   }
 }
 
-predicate canReuseSSAForMemoryResult(Instruction instruction) {
+predicate canReuseSsaForMemoryResult(Instruction instruction) {
   exists(OldInstruction oldInstruction |
     oldInstruction = getOldInstruction(instruction) and
     (
       // The previous iteration said it was reusable, so we should mark it as reusable as well.
-      Alias::canReuseSSAForOldResult(oldInstruction)
+      Alias::canReuseSsaForOldResult(oldInstruction)
       or
       // The current alias analysis says it is reusable.
-      Alias::getResultMemoryLocation(oldInstruction).canReuseSSA()
+      Alias::getResultMemoryLocation(oldInstruction).canReuseSsa()
     )
   )
   or
   exists(Alias::MemoryLocation defLocation |
     // This is a `Phi` for a reusable location, so the result of the `Phi` is reusable as well.
     instruction = phiInstruction(_, defLocation) and
-    defLocation.canReuseSSA()
+    defLocation.canReuseSsa()
   )
   // We don't support reusing SSA for any location that could create a `Chi` instruction.
 }
 
 /**
- * Expose some of the internal predicates to PrintSSA.qll. We do this by publically importing those modules in the
- * `DebugSSA` module, which is then imported by PrintSSA.
+ * Expose some of the internal predicates to PrintSSA.qll. We do this by publicly importing those modules in the
+ * `DebugSsa` module, which is then imported by PrintSSA.
  */
-module DebugSSA {
+module DebugSsa {
   import PhiInsertion
   import DefUse
 }
@@ -1038,7 +1362,7 @@ private module CachedForDebugging {
 
   private OldIR::IRTempVariable getOldTempVariable(IRTempVariable var) {
     result.getEnclosingFunction() = var.getEnclosingFunction() and
-    result.getAST() = var.getAST() and
+    result.getAst() = var.getAst() and
     result.getTag() = var.getTag()
   }
 
@@ -1061,71 +1385,22 @@ private module CachedForDebugging {
   int maxValue() { result = 2147483647 }
 }
 
-module SSAConsistency {
-  /**
-   * Holds if a `MemoryOperand` has more than one `MemoryLocation` assigned by alias analysis.
-   */
-  query predicate multipleOperandMemoryLocations(
-    OldIR::MemoryOperand operand, string message, OldIR::IRFunction func, string funcText
-  ) {
-    exists(int locationCount |
-      locationCount = strictcount(Alias::getOperandMemoryLocation(operand)) and
-      locationCount > 1 and
-      func = operand.getEnclosingIRFunction() and
-      funcText = Language::getIdentityString(func.getFunction()) and
-      message =
-        operand.getUse().toString() + " " + "Operand has " + locationCount.toString() +
-          " memory accesses in function '$@': " +
-          strictconcat(Alias::getOperandMemoryLocation(operand).toString(), ", ")
-    )
-  }
-
-  /**
-   * Holds if a `MemoryLocation` does not have an associated `VirtualVariable`.
-   */
-  query predicate missingVirtualVariableForMemoryLocation(
-    Alias::MemoryLocation location, string message, OldIR::IRFunction func, string funcText
-  ) {
-    not exists(location.getVirtualVariable()) and
-    func = location.getIRFunction() and
-    funcText = Language::getIdentityString(func.getFunction()) and
-    message = "Memory location has no virtual variable in function '$@'."
-  }
-
-  /**
-   * Holds if a `MemoryLocation` is a member of more than one `VirtualVariable`.
-   */
-  query predicate multipleVirtualVariablesForMemoryLocation(
-    Alias::MemoryLocation location, string message, OldIR::IRFunction func, string funcText
-  ) {
-    exists(int vvarCount |
-      vvarCount = strictcount(location.getVirtualVariable()) and
-      vvarCount > 1 and
-      func = location.getIRFunction() and
-      funcText = Language::getIdentityString(func.getFunction()) and
-      message =
-        "Memory location has " + vvarCount.toString() + " virtual variables in function '$@': (" +
-          concat(Alias::VirtualVariable vvar |
-            vvar = location.getVirtualVariable()
-          |
-            vvar.toString(), ", "
-          ) + ")."
-    )
-  }
-}
-
 /**
  * Provides the portion of the parameterized IR interface that is used to construct the SSA stages
  * of the IR. The raw stage of the IR does not expose these predicates.
  * These predicates are all just aliases for predicates defined in the `Cached` module. This ensures
  * that all of SSA construction will be evaluated in the same stage.
  */
-module SSA {
+module Ssa {
   class MemoryLocation = Alias::MemoryLocation;
 
   predicate hasPhiInstruction = Cached::hasPhiInstructionCached/2;
 
   predicate hasChiInstruction = Cached::hasChiInstructionCached/1;
 
+  predicate hasChiNodeAfterUninitializedGroup = Cached::hasChiNodeAfterUninitializedGroup/1;
+
   predicate hasUnreachedInstruction = Cached::hasUnreachedInstructionCached/1;
+
+  class VariableGroup = Alias::VariableGroup;
 }

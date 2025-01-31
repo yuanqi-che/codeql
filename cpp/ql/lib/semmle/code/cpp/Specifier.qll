@@ -12,7 +12,7 @@ private import semmle.code.cpp.internal.ResolveClass
 class Specifier extends Element, @specifier {
   /** Gets a dummy location for the specifier. */
   override Location getLocation() {
-    suppressUnusedThis(this) and
+    exists(this) and
     result instanceof UnknownDefaultLocation
   }
 
@@ -38,7 +38,7 @@ class FunctionSpecifier extends Specifier {
 
 /**
  * A C/C++ storage class specifier: `auto`, `register`, `static`, `extern`,
- * or `mutable".
+ * or `mutable`.
  */
 class StorageClassSpecifier extends Specifier {
   StorageClassSpecifier() { this.hasName(["auto", "register", "static", "extern", "mutable"]) }
@@ -256,9 +256,13 @@ class AttributeArgument extends Element, @attribute_arg {
 
   /**
    * Gets the text for the value of this argument, if its value is
-   * a string or a number.
+   * a constant or a token.
    */
-  string getValueText() { attribute_arg_value(underlyingElement(this), result) }
+  string getValueText() {
+    if underlyingElement(this) instanceof @attribute_arg_constant_expr
+    then result = this.getValueConstant().getValue()
+    else attribute_arg_value(underlyingElement(this), result)
+  }
 
   /**
    * Gets the value of this argument, if its value is integral.
@@ -269,6 +273,18 @@ class AttributeArgument extends Element, @attribute_arg {
    * Gets the value of this argument, if its value is a type.
    */
   Type getValueType() { attribute_arg_type(underlyingElement(this), unresolveElement(result)) }
+
+  /**
+   * Gets the value of this argument, if its value is a constant.
+   */
+  Expr getValueConstant() {
+    attribute_arg_constant(underlyingElement(this), unresolveElement(result))
+  }
+
+  /**
+   * Gets the value of this argument, if its value is an expression.
+   */
+  Expr getValueExpr() { attribute_arg_expr(underlyingElement(this), unresolveElement(result)) }
 
   /**
    * Gets the attribute to which this is an argument.
@@ -286,19 +302,23 @@ class AttributeArgument extends Element, @attribute_arg {
   override Location getLocation() { attribute_args(underlyingElement(this), _, _, _, result) }
 
   override string toString() {
-    if exists(@attribute_arg_empty self | self = underlyingElement(this))
+    if underlyingElement(this) instanceof @attribute_arg_empty
     then result = "empty argument"
     else
       exists(string prefix, string tail |
         (if exists(this.getName()) then prefix = this.getName() + "=" else prefix = "") and
         (
-          if exists(@attribute_arg_type self | self = underlyingElement(this))
+          if underlyingElement(this) instanceof @attribute_arg_type
           then tail = this.getValueType().getName()
-          else tail = this.getValueText()
+          else
+            if underlyingElement(this) instanceof @attribute_arg_constant_expr
+            then tail = this.getValueConstant().toString()
+            else
+              if underlyingElement(this) instanceof @attribute_arg_expr
+              then tail = this.getValueExpr().toString()
+              else tail = this.getValueText()
         ) and
         result = prefix + tail
       )
   }
 }
-
-private predicate suppressUnusedThis(Specifier s) { any() }

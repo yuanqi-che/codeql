@@ -3,26 +3,12 @@
  */
 
 import java
-import semmle.code.java.dataflow.ExternalFlow
+private import semmle.code.java.dataflow.DataFlow
+private import semmle.code.java.dataflow.TaintTracking
 
 /** The class `org.apache.ibatis.jdbc.SqlRunner`. */
 class MyBatisSqlRunner extends RefType {
   MyBatisSqlRunner() { this.hasQualifiedName("org.apache.ibatis.jdbc", "SqlRunner") }
-}
-
-private class SqlSinkCsv extends SinkModelCsv {
-  override predicate row(string row) {
-    row =
-      [
-        //"package;type;overrides;name;signature;ext;spec;kind"
-        "org.apache.ibatis.jdbc;SqlRunner;false;delete;(String,Object[]);;Argument[0];sql",
-        "org.apache.ibatis.jdbc;SqlRunner;false;insert;(String,Object[]);;Argument[0];sql",
-        "org.apache.ibatis.jdbc;SqlRunner;false;run;(String);;Argument[0];sql",
-        "org.apache.ibatis.jdbc;SqlRunner;false;selectAll;(String,Object[]);;Argument[0];sql",
-        "org.apache.ibatis.jdbc;SqlRunner;false;selectOne;(String,Object[]);;Argument[0];sql",
-        "org.apache.ibatis.jdbc;SqlRunner;false;update;(String,Object[]);;Argument[0];sql"
-      ]
-  }
 }
 
 /** The class `org.apache.ibatis.session.Configuration`. */
@@ -83,9 +69,7 @@ class IbatisSqlOperationAnnotation extends Annotation {
   /**
    * Gets this annotation's SQL statement string.
    */
-  string getSqlValue() {
-    result = this.getAValue("value").(CompileTimeConstantExpr).getStringValue()
-  }
+  string getSqlValue() { result = this.getAStringArrayValue("value") }
 }
 
 /**
@@ -101,4 +85,46 @@ class MyBatisSqlOperationAnnotationMethod extends Method {
 /** The interface `org.apache.ibatis.annotations.Param`. */
 class TypeParam extends Interface {
   TypeParam() { this.hasQualifiedName("org.apache.ibatis.annotations", "Param") }
+}
+
+private class MyBatisProvider extends RefType {
+  MyBatisProvider() {
+    this.hasQualifiedName("org.apache.ibatis.annotations",
+      ["Select", "Delete", "Insert", "Update"] + "Provider")
+  }
+}
+
+/**
+ * A return statement of a method used in a MyBatis Provider.
+ *
+ * See
+ * - `MyBatisProvider`
+ * - https://mybatis.org/mybatis-3/apidocs/org/apache/ibatis/annotations/package-summary.html
+ */
+class MyBatisInjectionSink extends DataFlow::Node {
+  MyBatisInjectionSink() {
+    exists(Annotation a, Method m |
+      a.getType() instanceof MyBatisProvider and
+      m.getDeclaringType() = a.getValue(["type", "value"]).(TypeLiteral).getTypeName().getType() and
+      m.hasName(a.getValue("method").(StringLiteral).getValue()) and
+      exists(ReturnStmt ret | this.asExpr() = ret.getResult() and ret.getEnclosingCallable() = m)
+    )
+  }
+}
+
+private class MyBatisProviderStep extends TaintTracking::AdditionalValueStep {
+  override predicate step(DataFlow::Node n1, DataFlow::Node n2) {
+    exists(MethodCall ma, Annotation a, Method providerMethod |
+      exists(int i |
+        ma.getArgument(pragma[only_bind_into](i)) = n1.asExpr() and
+        providerMethod.getParameter(pragma[only_bind_into](i)) = n2.asParameter()
+      )
+    |
+      a.getType() instanceof MyBatisProvider and
+      ma.getMethod().getAnAnnotation() = a and
+      providerMethod.getDeclaringType() =
+        a.getValue(["type", "value"]).(TypeLiteral).getTypeName().getType() and
+      providerMethod.hasName(a.getValue("method").(StringLiteral).getValue())
+    )
+  }
 }

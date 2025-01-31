@@ -12,18 +12,21 @@ private import semmle.python.ApiGraphs
 private import semmle.python.regex
 private import semmle.python.frameworks.Stdlib
 private import semmle.python.frameworks.internal.InstanceTaintStepsHelper
+private import semmle.python.frameworks.data.ModelsAsData
 
 /**
+ * INTERNAL: Do not use.
+ *
  * Provides models for the `tornado` PyPI package.
  * See https://www.tornadoweb.org/en/stable/.
  */
-private module Tornado {
+module Tornado {
   /**
    * Provides models for the `tornado.httputil.HTTPHeaders` class
    *
    * See https://www.tornadoweb.org/en/stable/httputil.html#tornado.httputil.HTTPHeaders.
    */
-  module HTTPHeaders {
+  module HttpHeaders {
     /**
      * A source of instances of `tornado.httputil.HTTPHeaders`, extend this class to model new instances.
      *
@@ -35,7 +38,7 @@ private module Tornado {
      */
     abstract class InstanceSource extends DataFlow::LocalSourceNode { }
 
-    /** Gets a reference to an instance of `tornado.httputil.HTTPHeaders`. */
+    /** Gets a reference to an instance of `tornado.httputil.HttpHeaders`. */
     private DataFlow::TypeTrackingNode instance(DataFlow::TypeTracker t) {
       t.start() and
       result instanceof InstanceSource
@@ -43,7 +46,7 @@ private module Tornado {
       exists(DataFlow::TypeTracker t2 | result = instance(t2).track(t2, t))
     }
 
-    /** Gets a reference to an instance of `tornado.httputil.HTTPHeaders`. */
+    /** Gets a reference to an instance of `tornado.httputil.HttpHeaders`. */
     DataFlow::Node instance() { instance(DataFlow::TypeTracker::end()).flowsTo(result) }
 
     /**
@@ -60,6 +63,50 @@ private module Tornado {
 
       override string getAsyncMethodName() { none() }
     }
+
+    /**
+     * A dict-like write to an item of an `HTTPHeaders` object.
+     */
+    private class TornadoHeaderSubscriptWrite extends Http::Server::ResponseHeaderWrite::Range {
+      DataFlow::Node index;
+      DataFlow::Node value;
+
+      TornadoHeaderSubscriptWrite() {
+        exists(SubscriptNode subscript |
+          subscript.getObject() = instance().asCfgNode() and
+          value.asCfgNode() = subscript.(DefinitionNode).getValue() and
+          index.asCfgNode() = subscript.getIndex() and
+          this.asCfgNode() = subscript
+        )
+      }
+
+      override DataFlow::Node getNameArg() { result = index }
+
+      override DataFlow::Node getValueArg() { result = value }
+
+      override predicate nameAllowsNewline() { none() }
+
+      override predicate valueAllowsNewline() { none() }
+    }
+
+    /**
+     * A call to `HTTPHeaders.add`.
+     */
+    private class TornadoHeadersAppendCall extends Http::Server::ResponseHeaderWrite::Range,
+      DataFlow::MethodCallNode
+    {
+      TornadoHeadersAppendCall() { this.calls(instance(), "add") }
+
+      override DataFlow::Node getNameArg() { result = [this.getArg(0), this.getArgByName("name")] }
+
+      override DataFlow::Node getValueArg() {
+        result in [this.getArg(1), this.getArgByName("value")]
+      }
+
+      override predicate nameAllowsNewline() { none() }
+
+      override predicate valueAllowsNewline() { none() }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -69,7 +116,7 @@ private module Tornado {
   API::Node tornado() { result = API::moduleImport("tornado") }
 
   /** Provides models for the `tornado` module. */
-  module tornado {
+  module TornadoModule {
     // -------------------------------------------------------------------------
     // tornado.web
     // -------------------------------------------------------------------------
@@ -77,7 +124,7 @@ private module Tornado {
     API::Node web() { result = tornado().getMember("web") }
 
     /** Provides models for the `tornado.web` module */
-    module web {
+    module Web {
       /**
        * Provides models for the `tornado.web.RequestHandler` class and subclasses.
        *
@@ -85,24 +132,28 @@ private module Tornado {
        */
       module RequestHandler {
         /** Gets a reference to the `tornado.web.RequestHandler` class or any subclass. */
-        API::Node subclassRef() { result = web().getMember("RequestHandler").getASubclass*() }
+        API::Node subclassRef() {
+          result = web().getMember("RequestHandler").getASubclass*()
+          or
+          result = ModelOutput::getATypeNode("tornado.web.RequestHandler~Subclass").getASubclass*()
+        }
 
         /** A RequestHandler class (most likely in project code). */
         class RequestHandlerClass extends Class {
-          RequestHandlerClass() { this.getParent() = subclassRef().getAUse().asExpr() }
+          RequestHandlerClass() { this.getParent() = subclassRef().asSource().asExpr() }
 
           /** Gets a function that could handle incoming requests, if any. */
           Function getARequestHandler() {
             // TODO: This doesn't handle attribute assignment. Should be OK, but analysis is not as complete as with
             // points-to and `.lookup`, which would handle `post = my_post_handler` inside class def
             result = this.getAMethod() and
-            result.getName() = HTTP::httpVerbLower()
+            result.getName() = Http::httpVerbLower()
           }
 
           /** Gets a reference to this class. */
           private DataFlow::TypeTrackingNode getARef(DataFlow::TypeTracker t) {
             t.start() and
-            result.asExpr().(ClassExpr) = this.getParent()
+            result.asExpr() = this.getParent()
             or
             exists(DataFlow::TypeTracker t2 | result = this.getARef(t2).track(t2, t))
           }
@@ -123,8 +174,7 @@ private module Tornado {
         abstract class InstanceSource extends DataFlow::LocalSourceNode { }
 
         /** The `self` parameter in a method on the `tornado.web.RequestHandler` class or any subclass. */
-        private class SelfParam extends InstanceSource, RemoteFlowSource::Range,
-          DataFlow::ParameterNode {
+        class SelfParam extends InstanceSource, RemoteFlowSource::Range, DataFlow::ParameterNode {
           SelfParam() {
             exists(RequestHandlerClass cls | cls.getAMethod().getArg(0) = this.getParameter())
           }
@@ -196,11 +246,31 @@ private module Tornado {
           override string getAsyncMethodName() { none() }
         }
 
-        private class RequestAttrAccess extends tornado::httputil::HttpServerRequest::InstanceSource {
+        private class RequestAttrAccess extends TornadoModule::HttpUtil::HttpServerRequest::InstanceSource
+        {
           RequestAttrAccess() {
             this.(DataFlow::AttrRead).getObject() = instance() and
             this.(DataFlow::AttrRead).getAttributeName() = "request"
           }
+        }
+
+        /** A call to `RequestHandler.set_header` or `RequestHandler.add_header` */
+        private class TornadoSetHeaderCall extends Http::Server::ResponseHeaderWrite::Range,
+          DataFlow::MethodCallNode
+        {
+          TornadoSetHeaderCall() { this.calls(instance(), ["set_header", "add_header"]) }
+
+          override DataFlow::Node getNameArg() {
+            result = [this.getArg(0), this.getArgByName("name")]
+          }
+
+          override DataFlow::Node getValueArg() {
+            result in [this.getArg(1), this.getArgByName("value")]
+          }
+
+          override predicate nameAllowsNewline() { none() }
+
+          override predicate valueAllowsNewline() { none() }
         }
       }
 
@@ -211,7 +281,11 @@ private module Tornado {
        */
       module Application {
         /** Gets a reference to the `tornado.web.Application` class. */
-        API::Node classRef() { result = web().getMember("Application") }
+        API::Node classRef() {
+          result = web().getMember("Application")
+          or
+          result = ModelOutput::getATypeNode("tornado.web.Application~Subclass").getASubclass*()
+        }
 
         /**
          * A source of instances of `tornado.web.Application`, extend this class to model new instances.
@@ -260,7 +334,7 @@ private module Tornado {
     API::Node httputil() { result = tornado().getMember("httputil") }
 
     /** Provides models for the `tornado.httputil` module */
-    module httputil {
+    module HttpUtil {
       /**
        * Provides models for the `tornado.httputil.HttpServerRequest` class
        *
@@ -268,7 +342,12 @@ private module Tornado {
        */
       module HttpServerRequest {
         /** Gets a reference to the `tornado.httputil.HttpServerRequest` class. */
-        API::Node classRef() { result = httputil().getMember("HttpServerRequest") }
+        API::Node classRef() {
+          result = httputil().getMember("HttpServerRequest")
+          or
+          result =
+            ModelOutput::getATypeNode("tornado.httputil.HttpServerRequest~Subclass").getASubclass*()
+        }
 
         /**
          * A source of instances of `tornado.httputil.HttpServerRequest`, extend this class to model new instances.
@@ -323,9 +402,9 @@ private module Tornado {
           override string getAsyncMethodName() { none() }
         }
 
-        /** An `HTTPHeaders` instance that originates from a Tornado request. */
-        private class TornadoRequestHTTPHeadersInstances extends HTTPHeaders::InstanceSource {
-          TornadoRequestHTTPHeadersInstances() {
+        /** An `HttpHeaders` instance that originates from a Tornado request. */
+        private class TornadoRequestHttpHeadersInstances extends HttpHeaders::InstanceSource {
+          TornadoRequestHttpHeadersInstances() {
             this.(DataFlow::AttrRead).accesses(instance(), "headers")
           }
         }
@@ -354,14 +433,16 @@ private module Tornado {
   // ---------------------------------------------------------------------------
   // routing
   // ---------------------------------------------------------------------------
-  /** A sequence that defines a number of route rules */
+  /** Gets a sequence that defines a number of route rules */
   SequenceNode routeSetupRuleList() {
-    exists(CallNode call | call = any(tornado::web::Application::ClassInstantiation c).asCfgNode() |
+    exists(CallNode call |
+      call = any(TornadoModule::Web::Application::ClassInstantiation c).asCfgNode()
+    |
       result in [call.getArg(0), call.getArgByName("handlers")]
     )
     or
     exists(CallNode call |
-      call.getFunction() = tornado::web::Application::add_handlers().asCfgNode()
+      call.getFunction() = TornadoModule::Web::Application::add_handlers().asCfgNode()
     |
       result in [call.getArg(1), call.getArgByName("host_handlers")]
     )
@@ -370,22 +451,19 @@ private module Tornado {
   }
 
   /** A tornado route setup. */
-  abstract class TornadoRouteSetup extends HTTP::Server::RouteSetup::Range {
+  abstract class TornadoRouteSetup extends Http::Server::RouteSetup::Range {
     override string getFramework() { result = "Tornado" }
   }
 
   /**
    * A regex that is used to set up a route.
    *
-   * Needs this subclass to be considered a RegexString.
+   * Needs this subclass to be considered a RegExpInterpretation.
    */
-  private class TornadoRouteRegex extends RegexString {
+  private class TornadoRouteRegex extends RegExpInterpretation::Range {
     TornadoRouteSetup setup;
 
-    TornadoRouteRegex() {
-      this instanceof StrConst and
-      setup.getUrlPatternArg().getALocalSource() = DataFlow::exprNode(this)
-    }
+    TornadoRouteRegex() { this = setup.getUrlPatternArg() }
 
     TornadoRouteSetup getRouteSetup() { result = setup }
   }
@@ -403,7 +481,7 @@ private module Tornado {
     override DataFlow::Node getUrlPatternArg() { result.asCfgNode() = node.getElement(0) }
 
     override Function getARequestHandler() {
-      exists(tornado::web::RequestHandler::RequestHandlerClass cls |
+      exists(TornadoModule::Web::RequestHandler::RequestHandlerClass cls |
         cls.getARef().asCfgNode() = node.getElement(1) and
         result = cls.getARequestHandler()
       )
@@ -415,26 +493,36 @@ private module Tornado {
       // more FPs. If this turns out to be the wrong tradeoff, we can always change our mind.
       exists(Function requestHandler | requestHandler = this.getARequestHandler() |
         not exists(this.getUrlPattern()) and
-        result in [requestHandler.getArg(_), requestHandler.getArgByName(_)] and
+        result in [
+            requestHandler.getArg(_), requestHandler.getArgByName(_),
+            requestHandler.getVararg().(Parameter), requestHandler.getKwarg().(Parameter)
+          ] and
         not result = requestHandler.getArg(0)
       )
       or
-      exists(Function requestHandler, TornadoRouteRegex regex |
+      exists(Function requestHandler, TornadoRouteRegex regexUse, RegExp regex |
+        regex.getAUse() = regexUse and
         requestHandler = this.getARequestHandler() and
-        regex.getRouteSetup() = this
+        regexUse.getRouteSetup() = this
       |
         // first group will have group number 1
         result = requestHandler.getArg(regex.getGroupNumber(_, _))
         or
         result = requestHandler.getArgByName(regex.getGroupName(_, _))
+        or
+        exists(regex.getGroupNumber(_, _)) and
+        result = requestHandler.getVararg()
+        or
+        exists(regex.getGroupName(_, _)) and
+        result = requestHandler.getKwarg()
       )
     }
   }
 
   /** A request handler defined in a tornado RequestHandler class, that has no known route. */
-  private class TornadoRequestHandlerWithoutKnownRoute extends HTTP::Server::RequestHandler::Range {
+  private class TornadoRequestHandlerWithoutKnownRoute extends Http::Server::RequestHandler::Range {
     TornadoRequestHandlerWithoutKnownRoute() {
-      exists(tornado::web::RequestHandler::RequestHandlerClass cls |
+      exists(TornadoModule::Web::RequestHandler::RequestHandlerClass cls |
         cls.getARequestHandler() = this
       ) and
       not exists(TornadoRouteSetup setup | setup.getARequestHandler() = this)
@@ -444,7 +532,10 @@ private module Tornado {
       // Since we don't know the URL pattern, we simply mark all parameters as a routed
       // parameter. This should give us more RemoteFlowSources but could also lead to
       // more FPs. If this turns out to be the wrong tradeoff, we can always change our mind.
-      result in [this.getArg(_), this.getArgByName(_)] and
+      result in [
+          this.getArg(_), this.getArgByName(_), this.getVararg().(Parameter),
+          this.getKwarg().(Parameter)
+        ] and
       not result = this.getArg(0)
     }
 
@@ -459,10 +550,11 @@ private module Tornado {
    *
    * See https://www.tornadoweb.org/en/stable/web.html#tornado.web.RequestHandler.redirect
    */
-  private class TornadoRequestHandlerRedirectCall extends HTTP::Server::HttpRedirectResponse::Range,
-    DataFlow::CallCfgNode {
+  private class TornadoRequestHandlerRedirectCall extends Http::Server::HttpRedirectResponse::Range,
+    DataFlow::CallCfgNode
+  {
     TornadoRequestHandlerRedirectCall() {
-      this.getFunction() = tornado::web::RequestHandler::redirectMethod()
+      this.getFunction() = TornadoModule::Web::RequestHandler::redirectMethod()
     }
 
     override DataFlow::Node getRedirectLocation() {
@@ -481,10 +573,11 @@ private module Tornado {
    *
    * See https://www.tornadoweb.org/en/stable/web.html#tornado.web.RequestHandler.write
    */
-  private class TornadoRequestHandlerWriteCall extends HTTP::Server::HttpResponse::Range,
-    DataFlow::CallCfgNode {
+  private class TornadoRequestHandlerWriteCall extends Http::Server::HttpResponse::Range,
+    DataFlow::CallCfgNode
+  {
     TornadoRequestHandlerWriteCall() {
-      this.getFunction() = tornado::web::RequestHandler::writeMethod()
+      this.getFunction() = TornadoModule::Web::RequestHandler::writeMethod()
     }
 
     override DataFlow::Node getBody() { result in [this.getArg(0), this.getArgByName("chunk")] }
@@ -499,10 +592,11 @@ private module Tornado {
    *
    * See https://www.tornadoweb.org/en/stable/web.html#tornado.web.RequestHandler.set_cookie
    */
-  class TornadoRequestHandlerSetCookieCall extends HTTP::Server::CookieWrite::Range,
-    DataFlow::MethodCallNode {
+  class TornadoRequestHandlerSetCookieCall extends Http::Server::SetCookieCall,
+    DataFlow::MethodCallNode
+  {
     TornadoRequestHandlerSetCookieCall() {
-      this.calls(tornado::web::RequestHandler::instance(), "set_cookie")
+      this.calls(TornadoModule::Web::RequestHandler::instance(), "set_cookie")
     }
 
     override DataFlow::Node getHeaderArg() { none() }

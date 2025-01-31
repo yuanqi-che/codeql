@@ -13,7 +13,7 @@
 
 import python
 
-/** Subset of ControlFlowNodes which might raise an exception */
+/** The subset of ControlFlowNodes which might raise an exception */
 class RaisingNode extends ControlFlowNode {
   RaisingNode() {
     exists(this.getAnExceptionalSuccessor())
@@ -83,7 +83,7 @@ class RaisingNode extends ControlFlowNode {
         result = this.innateException_objectapi()
       )
       or
-      not exists(ExceptFlowNode except | except = this.getAnExceptionalSuccessor()) and
+      not this.getAnExceptionalSuccessor() instanceof ExceptFlowNode and
       sequence_or_mapping(this) and
       result = theLookupErrorType()
       or
@@ -110,7 +110,7 @@ class RaisingNode extends ControlFlowNode {
         result = this.innateException()
       )
       or
-      not exists(ExceptFlowNode except | except = this.getAnExceptionalSuccessor()) and
+      not this.getAnExceptionalSuccessor() instanceof ExceptFlowNode and
       sequence_or_mapping(this) and
       result = ClassValue::lookupError()
       or
@@ -363,10 +363,14 @@ predicate scope_raises_unknown(Scope s) {
   )
 }
 
-/** ControlFlowNode for an 'except' statement. */
+/** The ControlFlowNode for an 'except' statement. */
 class ExceptFlowNode extends ControlFlowNode {
   ExceptFlowNode() { this.getNode() instanceof ExceptStmt }
 
+  /**
+   * Gets the type handled by this exception handler.
+   * `ExceptionType` in `except ExceptionType as e:`
+   */
   ControlFlowNode getType() {
     exists(ExceptStmt ex |
       this.getBasicBlock().dominates(result.getBasicBlock()) and
@@ -375,6 +379,10 @@ class ExceptFlowNode extends ControlFlowNode {
     )
   }
 
+  /**
+   * Gets the name assigned to the handled exception, if any.
+   * `e` in `except ExceptionType as e:`
+   */
   ControlFlowNode getName() {
     exists(ExceptStmt ex |
       this.getBasicBlock().dominates(result.getBasicBlock()) and
@@ -436,6 +444,29 @@ class ExceptFlowNode extends ControlFlowNode {
     exists(ClassValue handled | this.handledException(handled, _, _) |
       cls.getASuperType() = handled
     )
+  }
+}
+
+/** The ControlFlowNode for an 'except*' statement. */
+class ExceptGroupFlowNode extends ControlFlowNode {
+  ExceptGroupFlowNode() { this.getNode() instanceof ExceptGroupStmt }
+
+  /**
+   * Gets the type handled by this exception handler.
+   * `ExceptionType` in `except* ExceptionType as e:`
+   */
+  ControlFlowNode getType() {
+    this.getBasicBlock().dominates(result.getBasicBlock()) and
+    result = this.getNode().(ExceptGroupStmt).getType().getAFlowNode()
+  }
+
+  /**
+   * Gets the name assigned to the handled exception, if any.
+   * `e` in `except* ExceptionType as e:`
+   */
+  ControlFlowNode getName() {
+    this.getBasicBlock().dominates(result.getBasicBlock()) and
+    result = this.getNode().(ExceptGroupStmt).getName().getAFlowNode()
   }
 }
 

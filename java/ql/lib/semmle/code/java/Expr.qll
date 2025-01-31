@@ -2,10 +2,9 @@
  * Provides classes for working with Java expressions.
  */
 
-import Member
-import Type
-import Variable
-import Statement
+import java
+private import semmle.code.java.frameworks.android.Compose
+private import semmle.code.java.Constants
 
 /** A common super-class that represents all kinds of expressions. */
 class Expr extends ExprParent, @expr {
@@ -27,6 +26,9 @@ class Expr extends ExprParent, @expr {
 
   /** Gets the type of this expression. */
   Type getType() { exprs(this, _, result, _, _) }
+
+  /** Gets the Kotlin type of this expression. */
+  KotlinType getKotlinType() { exprsKotlinType(this, result) }
 
   /** Gets the compilation unit in which this expression occurs. */
   CompilationUnit getCompilationUnit() { result = this.getFile() }
@@ -59,10 +61,10 @@ class Expr extends ExprParent, @expr {
   Expr getAChildExpr() { exprs(result, _, _, this, _) }
 
   /** Gets the basic block in which this expression occurs, if any. */
-  BasicBlock getBasicBlock() { result.getANode() = this }
+  BasicBlock getBasicBlock() { result.getANode().asExpr() = this }
 
   /** Gets the `ControlFlowNode` corresponding to this expression. */
-  ControlFlowNode getControlFlowNode() { result = this }
+  ControlFlowNode getControlFlowNode() { result.asExpr() = this }
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   string getHalsteadID() { result = this.toString() }
@@ -99,6 +101,18 @@ class Expr extends ExprParent, @expr {
 
   /** Holds if this expression is parenthesized. */
   predicate isParenthesized() { isParenthesized(this, _) }
+
+  /**
+   * Gets the underlying expression looking through casts and not-nulls, if any.
+   * Otherwise just gets this expression.
+   */
+  Expr getUnderlyingExpr() {
+    if this instanceof CastingExpr or this instanceof NotNullExpr
+    then
+      result = this.(CastingExpr).getExpr().getUnderlyingExpr() or
+      result = this.(NotNullExpr).getExpr().getUnderlyingExpr()
+    else result = this
+  }
 }
 
 /**
@@ -124,7 +138,7 @@ class CompileTimeConstantExpr extends Expr {
       this instanceof Literal
       or
       // Casts to primitive types and casts to type `String`.
-      this.(CastExpr).getExpr().isCompileTimeConstant()
+      this.(CastingExpr).getExpr().isCompileTimeConstant()
       or
       // The unary operators `+`, `-`, `~`, and `!` (but not `++` or `--`).
       this.(PlusExpr).getExpr().isCompileTimeConstant()
@@ -158,6 +172,8 @@ class CompileTimeConstantExpr extends Expr {
         v.isFinal() and
         v.getInitializer().isCompileTimeConstant()
       )
+      or
+      this instanceof LiveLiteral
     )
   }
 
@@ -182,80 +198,19 @@ class CompileTimeConstantExpr extends Expr {
     exists(Variable v | this = v.getAnAccess() |
       result = v.getInitializer().(CompileTimeConstantExpr).getStringValue()
     )
+    or
+    result = this.(LiveLiteral).getValue().getStringValue()
   }
 
   /**
    * Gets the boolean value of this expression, where possible.
    */
+  pragma[nomagic]
   boolean getBooleanValue() {
     // Literal value.
     result = this.(BooleanLiteral).getBooleanValue()
     or
-    // No casts relevant to booleans.
-    // `!` is the only unary operator that evaluates to a boolean.
-    result = this.(LogNotExpr).getExpr().(CompileTimeConstantExpr).getBooleanValue().booleanNot()
-    or
-    // Handle binary expressions that have integer operands and a boolean result.
-    exists(BinaryExpr b, int left, int right |
-      b = this and
-      left = b.getLeftOperand().(CompileTimeConstantExpr).getIntValue() and
-      right = b.getRightOperand().(CompileTimeConstantExpr).getIntValue()
-    |
-      (
-        b instanceof LTExpr and
-        if left < right then result = true else result = false
-      )
-      or
-      (
-        b instanceof LEExpr and
-        if left <= right then result = true else result = false
-      )
-      or
-      (
-        b instanceof GTExpr and
-        if left > right then result = true else result = false
-      )
-      or
-      (
-        b instanceof GEExpr and
-        if left >= right then result = true else result = false
-      )
-      or
-      (
-        b instanceof EQExpr and
-        if left = right then result = true else result = false
-      )
-      or
-      (
-        b instanceof NEExpr and
-        if left != right then result = true else result = false
-      )
-    )
-    or
-    // Handle binary expressions that have boolean operands and a boolean result.
-    exists(BinaryExpr b, boolean left, boolean right |
-      b = this and
-      left = b.getLeftOperand().(CompileTimeConstantExpr).getBooleanValue() and
-      right = b.getRightOperand().(CompileTimeConstantExpr).getBooleanValue()
-    |
-      (
-        b instanceof EQExpr and
-        if left = right then result = true else result = false
-      )
-      or
-      (
-        b instanceof NEExpr and
-        if left != right then result = true else result = false
-      )
-      or
-      (b instanceof AndBitwiseExpr or b instanceof AndLogicalExpr) and
-      result = left.booleanAnd(right)
-      or
-      (b instanceof OrBitwiseExpr or b instanceof OrLogicalExpr) and
-      result = left.booleanOr(right)
-      or
-      b instanceof XorBitwiseExpr and result = left.booleanXor(right)
-    )
+    result = CalcCompileTimeConstants::calculateBooleanValue(this)
     or
     // Handle binary expressions that have `String` operands and a boolean result.
     exists(BinaryExpr b, string left, string right |
@@ -266,31 +221,24 @@ class CompileTimeConstantExpr extends Expr {
       /*
        * JLS 15.28 specifies that compile-time `String` constants are interned. Therefore `==`
        * equality can be interpreted as equality over the constant values, not the references.
+       *
+       * Kotlin's `==` and `===` operators will return the same result for `String`s, so they
+       * can be handled alike:
        */
 
       (
-        b instanceof EQExpr and
+        b instanceof ValueOrReferenceEqualsExpr and
         if left = right then result = true else result = false
       )
       or
       (
-        b instanceof NEExpr and
+        b instanceof ValueOrReferenceNotEqualsExpr and
         if left != right then result = true else result = false
       )
     )
     or
     // Note: no `getFloatValue()`, so we cannot support binary expressions with float or double operands.
-    // Ternary expressions, where the `true` and `false` expressions are boolean compile-time constants.
-    exists(ConditionalExpr ce, boolean condition |
-      ce = this and
-      condition = ce.getCondition().(CompileTimeConstantExpr).getBooleanValue() and
-      result = ce.getBranchExpr(condition).(CompileTimeConstantExpr).getBooleanValue()
-    )
-    or
-    // Simple or qualified names where the variable is final and the initializer is a constant.
-    exists(Variable v | this = v.getAnAccess() |
-      result = v.getInitializer().(CompileTimeConstantExpr).getBooleanValue()
-    )
+    result = this.(LiveLiteral).getValue().getBooleanValue()
   }
 
   /**
@@ -307,75 +255,35 @@ class CompileTimeConstantExpr extends Expr {
       result = this.(IntegerLiteral).getIntValue()
       or
       result = this.(CharacterLiteral).getCodePointValue()
-      or
-      exists(CastExpr cast, int val |
-        cast = this and val = cast.getExpr().(CompileTimeConstantExpr).getIntValue()
-      |
-        if cast.getType().hasName("byte")
-        then result = (val + 128).bitAnd(255) - 128
-        else
-          if cast.getType().hasName("short")
-          then result = (val + 32768).bitAnd(65535) - 32768
-          else
-            if cast.getType().hasName("char")
-            then result = val.bitAnd(65535)
-            else result = val
-      )
-      or
-      result = this.(PlusExpr).getExpr().(CompileTimeConstantExpr).getIntValue()
-      or
-      result = -this.(MinusExpr).getExpr().(CompileTimeConstantExpr).getIntValue()
-      or
-      result = this.(BitNotExpr).getExpr().(CompileTimeConstantExpr).getIntValue().bitNot()
-      or
-      // No `int` value for `LogNotExpr`.
-      exists(BinaryExpr b, int v1, int v2 |
-        b = this and
-        v1 = b.getLeftOperand().(CompileTimeConstantExpr).getIntValue() and
-        v2 = b.getRightOperand().(CompileTimeConstantExpr).getIntValue()
-      |
-        b instanceof MulExpr and result = v1 * v2
-        or
-        b instanceof DivExpr and result = v1 / v2
-        or
-        b instanceof RemExpr and result = v1 % v2
-        or
-        b instanceof AddExpr and result = v1 + v2
-        or
-        b instanceof SubExpr and result = v1 - v2
-        or
-        b instanceof LShiftExpr and result = v1.bitShiftLeft(v2)
-        or
-        b instanceof RShiftExpr and result = v1.bitShiftRightSigned(v2)
-        or
-        b instanceof URShiftExpr and result = v1.bitShiftRight(v2)
-        or
-        b instanceof AndBitwiseExpr and result = v1.bitAnd(v2)
-        or
-        b instanceof OrBitwiseExpr and result = v1.bitOr(v2)
-        or
-        b instanceof XorBitwiseExpr and result = v1.bitXor(v2)
-        // No `int` value for `AndLogicalExpr` or `OrLogicalExpr`.
-        // No `int` value for `LTExpr`, `GTExpr`, `LEExpr`, `GEExpr`, `EQExpr` or `NEExpr`.
-      )
-      or
-      // Ternary conditional, with compile-time constant condition.
-      exists(ConditionalExpr ce, boolean condition |
-        ce = this and
-        condition = ce.getCondition().(CompileTimeConstantExpr).getBooleanValue() and
-        result = ce.getBranchExpr(condition).(CompileTimeConstantExpr).getIntValue()
-      )
-      or
-      // If a `Variable` is a `CompileTimeConstantExpr`, its value is its initializer.
-      exists(Variable v | this = v.getAnAccess() |
-        result = v.getInitializer().(CompileTimeConstantExpr).getIntValue()
-      )
     )
+    or
+    result = CalcCompileTimeConstants::calculateIntValue(this)
+    or
+    result = this.(LiveLiteral).getValue().getIntValue()
   }
 }
 
+private boolean getBoolValue(Expr e) { result = e.(CompileTimeConstantExpr).getBooleanValue() }
+
+private int getIntValue(Expr e) { result = e.(CompileTimeConstantExpr).getIntValue() }
+
+private module CalcCompileTimeConstants = CalculateConstants<getBoolValue/1, getIntValue/1>;
+
 /** An expression parent is an element that may have an expression as its child. */
 class ExprParent extends @exprparent, Top { }
+
+/**
+ * An error expression.
+ *
+ * These may be generated by upgrade or downgrade scripts when databases
+ * cannot be fully converted, or generated by the extractor when extracting
+ * source code containing errors.
+ */
+class ErrorExpr extends Expr, @errorexpr {
+  override string toString() { result = "<error expr>" }
+
+  override string getAPrimaryQlClass() { result = "ErrorExpr" }
+}
 
 /**
  * An array access.
@@ -470,7 +378,17 @@ class ArrayInit extends Expr, @arrayinit {
   override string getAPrimaryQlClass() { result = "ArrayInit" }
 }
 
-/** A common super-class that represents all varieties of assignments. */
+/**
+ * A common super-class that represents many varieties of assignments.
+ *
+ * This does not cover unary assignments such as `i++`, and initialization of
+ * local variables at their declaration such as `int i = 0;`.
+ *
+ * To cover more cases of variable updates, see the classes `VariableAssign`,
+ * `VariableUpdate` and `VarWrite`. But consider that they don't cover array
+ * element assignments since there the assignment destination is not directly
+ * the array variable but instead an `ArrayAccess`.
+ */
 class Assignment extends Expr, @assignment {
   /** Gets the destination (left-hand side) of the assignment. */
   Expr getDest() { result.isNthChildOf(this, 0) }
@@ -497,6 +415,17 @@ class Assignment extends Expr, @assignment {
  */
 class AssignExpr extends Assignment, @assignexpr {
   override string getAPrimaryQlClass() { result = "AssignExpr" }
+}
+
+/**
+ * A Kotlin class member initializer assignment.
+ *
+ * For example, `class X { val y = 1 }`
+ */
+class KtInitializerAssignExpr extends AssignExpr {
+  KtInitializerAssignExpr() { ktInitializerAssignment(this) }
+
+  override string getAPrimaryQlClass() { result = "KtInitializerAssignExpr" }
 }
 
 /**
@@ -576,24 +505,24 @@ class AssignXorExpr extends AssignOp, @assignxorexpr {
 }
 
 /** A compound assignment expression using the `<<=` operator. */
-class AssignLShiftExpr extends AssignOp, @assignlshiftexpr {
+class AssignLeftShiftExpr extends AssignOp, @assignlshiftexpr {
   override string getOp() { result = "<<=" }
 
-  override string getAPrimaryQlClass() { result = "AssignLShiftExpr" }
+  override string getAPrimaryQlClass() { result = "AssignLeftShiftExpr" }
 }
 
 /** A compound assignment expression using the `>>=` operator. */
-class AssignRShiftExpr extends AssignOp, @assignrshiftexpr {
+class AssignRightShiftExpr extends AssignOp, @assignrshiftexpr {
   override string getOp() { result = ">>=" }
 
-  override string getAPrimaryQlClass() { result = "AssignRShiftExpr" }
+  override string getAPrimaryQlClass() { result = "AssignRightShiftExpr" }
 }
 
 /** A compound assignment expression using the `>>>=` operator. */
-class AssignURShiftExpr extends AssignOp, @assignurshiftexpr {
+class AssignUnsignedRightShiftExpr extends AssignOp, @assignurshiftexpr {
   override string getOp() { result = ">>>=" }
 
-  override string getAPrimaryQlClass() { result = "AssignURShiftExpr" }
+  override string getAPrimaryQlClass() { result = "AssignUnsignedRightShiftExpr" }
 }
 
 /** A common super-class to represent constant literals. */
@@ -601,6 +530,9 @@ class Literal extends Expr, @literal {
   /**
    * Gets a string representation of this literal as it appeared
    * in the source code.
+   *
+   * For Kotlin the result might not match the exact representation
+   * used in the source code.
    *
    * **Important:** Unless a query explicitly wants to check how
    * a literal was written in the source code, the predicate
@@ -687,14 +619,14 @@ class LongLiteral extends Literal, @longliteral {
  * A float literal is never negative; a preceding minus, if any, will always
  * be modeled as separate `MinusExpr`.
  */
-class FloatingPointLiteral extends Literal, @floatingpointliteral {
+class FloatLiteral extends Literal, @floatingpointliteral {
   /**
    * Gets the value of this literal as CodeQL 64-bit `float`. The value will
    * be parsed as Java 32-bit `float` and then converted to a CodeQL `float`.
    */
   float getFloatValue() { result = this.getValue().toFloat() }
 
-  override string getAPrimaryQlClass() { result = "FloatingPointLiteral" }
+  override string getAPrimaryQlClass() { result = "FloatLiteral" }
 }
 
 /**
@@ -767,14 +699,6 @@ class StringLiteral extends Literal, @stringliteral {
    * replacement character U+FFFD.
    */
   override string getValue() { result = super.getValue() }
-
-  /**
-   * DEPRECATED: This predicate will be removed in a future version because
-   * it is just an alias for `getValue()`; that predicate should be used instead.
-   *
-   * Gets the literal string without the quotes.
-   */
-  deprecated string getRepresentedString() { result = this.getValue() }
 
   /** Holds if this string literal is a text block (`""" ... """`). */
   predicate isTextBlock() { this.getLiteral().matches("\"\"\"%") }
@@ -854,24 +778,24 @@ class SubExpr extends BinaryExpr, @subexpr {
 }
 
 /** A binary expression using the `<<` operator. */
-class LShiftExpr extends BinaryExpr, @lshiftexpr {
+class LeftShiftExpr extends BinaryExpr, @lshiftexpr {
   override string getOp() { result = " << " }
 
-  override string getAPrimaryQlClass() { result = "LShiftExpr" }
+  override string getAPrimaryQlClass() { result = "LeftShiftExpr" }
 }
 
 /** A binary expression using the `>>` operator. */
-class RShiftExpr extends BinaryExpr, @rshiftexpr {
+class RightShiftExpr extends BinaryExpr, @rshiftexpr {
   override string getOp() { result = " >> " }
 
-  override string getAPrimaryQlClass() { result = "RShiftExpr" }
+  override string getAPrimaryQlClass() { result = "RightShiftExpr" }
 }
 
 /** A binary expression using the `>>>` operator. */
-class URShiftExpr extends BinaryExpr, @urshiftexpr {
+class UnsignedRightShiftExpr extends BinaryExpr, @urshiftexpr {
   override string getOp() { result = " >>> " }
 
-  override string getAPrimaryQlClass() { result = "URShiftExpr" }
+  override string getAPrimaryQlClass() { result = "UnsignedRightShiftExpr" }
 }
 
 /** A binary expression using the `&` operator. */
@@ -937,18 +861,52 @@ class GEExpr extends BinaryExpr, @geexpr {
   override string getAPrimaryQlClass() { result = "GEExpr" }
 }
 
-/** A binary expression using the `==` operator. */
+/** A binary expression using Java's `==` or Kotlin's `===` operator. */
 class EQExpr extends BinaryExpr, @eqexpr {
   override string getOp() { result = " == " }
 
   override string getAPrimaryQlClass() { result = "EQExpr" }
 }
 
-/** A binary expression using the `!=` operator. */
+/** A binary expression using the Kotlin `==` operator, semantically equivalent to `Objects.equals`. */
+class ValueEQExpr extends BinaryExpr, @valueeqexpr {
+  override string getOp() { result = " (value equals) " }
+
+  override string getAPrimaryQlClass() { result = "ValueEQExpr" }
+}
+
+/** A binary expression using Java's `!=` or Kotlin's `!==` operator. */
 class NEExpr extends BinaryExpr, @neexpr {
   override string getOp() { result = " != " }
 
   override string getAPrimaryQlClass() { result = "NEExpr" }
+}
+
+/** A binary expression using the Kotlin `!=` operator, semantically equivalent to `Objects.equals`. */
+class ValueNEExpr extends BinaryExpr, @valueneexpr {
+  override string getOp() { result = " (value not-equals) " }
+
+  override string getAPrimaryQlClass() { result = "ValueNEExpr" }
+}
+
+/**
+ * A binary expression using either Java or Kotlin's `==` operator.
+ *
+ * This might test for reference equality or might function like `Objects.equals`. If you
+ * need to distinguish them, use `EQExpr` or `ValueEQExpr` instead.
+ */
+class ValueOrReferenceEqualsExpr extends BinaryExpr {
+  ValueOrReferenceEqualsExpr() { this instanceof EQExpr or this instanceof ValueEQExpr }
+}
+
+/**
+ * A binary expression using either Java or Kotlin's `!=` operator.
+ *
+ * This might test for reference equality or might function like `Objects.equals`. If you
+ * need to distinguish them, use `NEExpr` or `ValueNEExpr` instead.
+ */
+class ValueOrReferenceNotEqualsExpr extends BinaryExpr {
+  ValueOrReferenceNotEqualsExpr() { this instanceof NEExpr or this instanceof ValueNEExpr }
 }
 
 /**
@@ -1039,12 +997,16 @@ class GreaterThanComparison extends ComparisonExpr {
 
 /**
  * An equality test is a binary expression using
- * the `==` or `!=` operator.
+ * Java's `==` or `!=` operators, or Kotlin's `==`, `!=`, `===` or `!==` operators.
+ *
+ * This could be a reference- or a value-(in)equality test.
  */
 class EqualityTest extends BinaryExpr {
   EqualityTest() {
     this instanceof EQExpr or
-    this instanceof NEExpr
+    this instanceof NEExpr or
+    this instanceof ValueEQExpr or
+    this instanceof ValueNEExpr
   }
 
   /** Gets a boolean indicating whether this is `==` (true) or `!=` (false). */
@@ -1052,6 +1014,23 @@ class EqualityTest extends BinaryExpr {
     result = true and this instanceof EQExpr
     or
     result = false and this instanceof NEExpr
+    or
+    result = true and this instanceof ValueEQExpr
+    or
+    result = false and this instanceof ValueNEExpr
+  }
+}
+
+/**
+ * An equality test is a binary expression using
+ * Java's `==` or `!=` operators or Kotlin's `===` or `!==` operators.
+ *
+ * If either operand is a reference type, this is a reference-in/equality test.
+ */
+class ReferenceEqualityTest extends EqualityTest {
+  ReferenceEqualityTest() {
+    this instanceof EQExpr or
+    this instanceof NEExpr
   }
 }
 
@@ -1123,18 +1102,75 @@ class LogNotExpr extends UnaryExpr, @lognotexpr {
   override string getAPrimaryQlClass() { result = "LogNotExpr" }
 }
 
-/** A cast expression. */
-class CastExpr extends Expr, @castexpr {
-  /** Gets the target type of this cast expression. */
+/**
+ * Any kind of expression that casts values from one type to another.
+ *
+ * For Java, this is only `CastExpr`, but for Kotlin it includes
+ * various other explicit or implicit casting operators.
+ */
+class CastingExpr extends Expr {
+  CastingExpr() {
+    this instanceof @castexpr or
+    this instanceof @safecastexpr or
+    this instanceof @implicitcastexpr or
+    this instanceof @implicitnotnullexpr or
+    this instanceof @implicitcoerciontounitexpr or
+    this instanceof @unsafecoerceexpr
+  }
+
+  /** Gets the target type of this casting expression. */
   Expr getTypeExpr() { result.isNthChildOf(this, 0) }
 
-  /** Gets the expression to which the cast operator is applied. */
+  /** Gets the expression to which the casting operator is applied. */
   Expr getExpr() { result.isNthChildOf(this, 1) }
+}
 
+/** A cast expression. */
+class CastExpr extends CastingExpr, @castexpr {
   /** Gets a printable representation of this expression. */
   override string toString() { result = "(...)..." }
 
   override string getAPrimaryQlClass() { result = "CastExpr" }
+}
+
+/** A safe cast expression. */
+class SafeCastExpr extends CastingExpr, @safecastexpr {
+  /** Gets a printable representation of this expression. */
+  override string toString() { result = "... as? ..." }
+
+  override string getAPrimaryQlClass() { result = "SafeCastExpr" }
+}
+
+/** An implicit cast expression. */
+class ImplicitCastExpr extends CastingExpr, @implicitcastexpr {
+  /** Gets a printable representation of this expression. */
+  override string toString() { result = "<implicit cast>" }
+
+  override string getAPrimaryQlClass() { result = "ImplicitCastExpr" }
+}
+
+/** An implicit cast-to-non-null expression. */
+class ImplicitNotNullExpr extends CastingExpr, @implicitnotnullexpr {
+  /** Gets a printable representation of this expression. */
+  override string toString() { result = "<implicit not null>" }
+
+  override string getAPrimaryQlClass() { result = "ImplicitNotNullExpr" }
+}
+
+/** An implicit coercion-to-unit expression. */
+class ImplicitCoercionToUnitExpr extends CastingExpr, @implicitcoerciontounitexpr {
+  /** Gets a printable representation of this expression. */
+  override string toString() { result = "<implicit coercion to unit>" }
+
+  override string getAPrimaryQlClass() { result = "ImplicitCoercionToUnitExpr" }
+}
+
+/** An unsafe coerce expression. */
+class UnsafeCoerceExpr extends CastingExpr, @unsafecoerceexpr {
+  /** Gets a printable representation of this expression. */
+  override string toString() { result = "<unsafe coerce>" }
+
+  override string getAPrimaryQlClass() { result = "UnsafeCoerceExpr" }
 }
 
 /** A class instance creation expression. */
@@ -1155,15 +1191,15 @@ class ClassInstanceExpr extends Expr, ConstructorCall, @classinstancexpr {
   }
 
   /**
-   * Gets a type argument provided to the constructor of this class instance creation expression.
+   * Gets a type argument of the type of the created instance.
    *
-   * This is used for instantiations of parameterized classes.
+   * This is used for instantiations of parameterized classes. For example for
+   * `new ArrayList<String>()` the result would be the expression representing `String`.
    */
   Expr getATypeArgument() { result = this.getTypeName().(TypeAccess).getATypeArgument() }
 
   /**
-   * Gets the type argument provided to the constructor of this class instance creation expression
-   * at the specified (zero-based) position.
+   * Gets the type argument of the type of the created instance, at the specified (zero-based) position.
    */
   Expr getTypeArgument(int index) {
     result = this.getTypeName().(TypeAccess).getTypeArgument(index)
@@ -1200,10 +1236,23 @@ class ClassInstanceExpr extends Expr, ConstructorCall, @classinstancexpr {
   override Stmt getEnclosingStmt() { result = Expr.super.getEnclosingStmt() }
 
   /** Gets a printable representation of this expression. */
-  override string toString() { result = "new " + this.getConstructor().getName() + "(...)" }
+  override string toString() {
+    result = "new " + this.getConstructor().getName() + "(...)"
+    or
+    not exists(this.getConstructor()) and
+    result = "<ClassInstanceExpr that calls a missing constructor>"
+  }
 
   override string getAPrimaryQlClass() { result = "ClassInstanceExpr" }
 }
+
+/**
+ * An explicit `new TypeName(...)` expression.
+ *
+ * Note this does not include implicit instance creation such as lambda expressions
+ * or `instanceVar::methodName` references. To include those too, use `ClassInstanceExpr`.
+ */
+class NewClassExpr extends @newexpr, ClassInstanceExpr { }
 
 /** A functional expression is either a lambda expression or a member reference expression. */
 abstract class FunctionalExpr extends ClassInstanceExpr {
@@ -1226,7 +1275,24 @@ class LambdaExpr extends FunctionalExpr, @lambdaexpr {
    * Gets the implicit method corresponding to this lambda expression.
    * The parameters of the lambda expression are the parameters of this method.
    */
-  override Method asMethod() { result = this.getAnonymousClass().getAMethod() }
+  override Method asMethod() {
+    not this.isKotlinFunctionN() and
+    result = this.getAnonymousClass().getAMethod()
+    or
+    this.isKotlinFunctionN() and
+    result = this.getAnonymousClass().getAMethod() and
+    result.getNumberOfParameters() > 1
+  }
+
+  /**
+   * Holds if this expression is a big-arity lambda expression in Kotlin.
+   */
+  predicate isKotlinFunctionN() {
+    exists(RefType r |
+      this.getAnonymousClass().extendsOrImplements(r) and
+      r.getSourceDeclaration().hasQualifiedName("kotlin.jvm.functions", "FunctionN")
+    )
+  }
 
   /** Holds if the body of this lambda is an expression. */
   predicate hasExprBody() { lambdaKind(this, 0) }
@@ -1267,6 +1333,40 @@ class MemberRefExpr extends FunctionalExpr, @memberref {
    */
   override Method asMethod() { result = this.getAnonymousClass().getAMethod() }
 
+  private Expr getResultExpr() {
+    exists(Stmt stmt |
+      stmt = this.asMethod().getBody().(SingletonBlock).getStmt() and
+      (
+        result = stmt.(ReturnStmt).getResult()
+        or
+        // Note: Currently never an ExprStmt, but might change once https://github.com/github/codeql/issues/3605 is fixed
+        result = stmt.(ExprStmt).getExpr()
+      )
+    )
+  }
+
+  /**
+   * Gets the expression whose member this member reference refers to, that is, the left
+   * side of the `::`. For example, for the member reference `this::toString` the receiver
+   * expression is the `this` expression.
+   *
+   * This predicate might not have a result in all cases where the receiver expression is
+   * a type access, for example `MyClass::...`.
+   */
+  Expr getReceiverExpr() {
+    exists(Expr resultExpr | resultExpr = this.getResultExpr() |
+      result = resultExpr.(Call).getQualifier() and
+      // Ignore if the qualifier is a parameter of the method of the synthetic anonymous class
+      // (this is the case for method refs of instance methods which don't capture the instance, e.g. `Object::toString`)
+      // Could try to use TypeAccess as result here from child of MemberRefExpr, but that complexity might not be worth it
+      not this.asMethod().getAParameter().getAnAccess() = result
+      or
+      result = resultExpr.(ClassInstanceExpr).getTypeName()
+      // Don't cover array creation because ArrayCreationExpr currently does not have a predicate
+      // to easily get ArrayTypeAccess which should probably be the result here
+    )
+  }
+
   /**
    * Gets the receiver type whose member this expression refers to. The result might not be
    * the type which actually declares the member. For example, for the member reference `ArrayList::toString`,
@@ -1274,16 +1374,8 @@ class MemberRefExpr extends FunctionalExpr, @memberref {
    * `getReferencedCallable` will have `java.util.AbstractCollection.toString` as result, which `ArrayList` inherits.
    */
   RefType getReceiverType() {
-    exists(Stmt stmt, Expr resultExpr |
-      stmt = this.asMethod().getBody().(SingletonBlock).getStmt() and
-      (
-        resultExpr = stmt.(ReturnStmt).getResult()
-        or
-        // Note: Currently never an ExprStmt, but might change once https://github.com/github/codeql/issues/3605 is fixed
-        resultExpr = stmt.(ExprStmt).getExpr()
-      )
-    |
-      result = resultExpr.(MethodAccess).getReceiverType() or
+    exists(Expr resultExpr | resultExpr = this.getResultExpr() |
+      result = resultExpr.(MethodCall).getReceiverType() or
       result = resultExpr.(ClassInstanceExpr).getConstructedType() or
       result = resultExpr.(ArrayCreationExpr).getType()
     )
@@ -1298,6 +1390,47 @@ class MemberRefExpr extends FunctionalExpr, @memberref {
   override string toString() { result = "...::..." }
 
   override string getAPrimaryQlClass() { result = "MemberRefExpr" }
+}
+
+/**
+ * Property references are represented by their implicit class instance expressions,
+ * which instantiate an anonymous class that overrides the `get` and `set` methods designated by
+ * their functional interface type.
+ */
+class PropertyRefExpr extends ClassInstanceExpr, @propertyref {
+  /**
+   * Gets the implicit `get` method corresponding to this property reference expression, if any.
+   */
+  Method asGetMethod() {
+    result = this.getAnonymousClass().getAMethod() and result.getName() = "get"
+  }
+
+  /**
+   * Gets the implicit `set` method corresponding to this property reference expression, if any.
+   */
+  Method asSetMethod() {
+    result = this.getAnonymousClass().getAMethod() and result.getName() = "set"
+  }
+
+  /**
+   * Gets the property getter referenced by this property reference expression, if any.
+   */
+  Callable getGetterCallable() { propertyRefGetBinding(this, result) }
+
+  /**
+   * Gets the field referenced by this property reference expression, if any.
+   */
+  Field getField() { propertyRefFieldBinding(this, result) }
+
+  /**
+   * Gets the property setter referenced by this property reference expression, if any.
+   */
+  Callable getSetterCallable() { propertyRefSetBinding(this, result) }
+
+  /** Gets a printable representation of this expression. */
+  override string toString() { result = "...::..." }
+
+  override string getAPrimaryQlClass() { result = "PropertyRefExpr" }
 }
 
 /** A conditional expression or a `switch` expression. */
@@ -1369,16 +1502,32 @@ class SwitchExpr extends Expr, StmtParent, @switchexpr {
   Stmt getStmt(int index) { result = this.getAStmt() and result.getIndex() = index }
 
   /**
+   * Gets the `i`th case of this `switch` expression,
+   * which may be either a normal `case` or a `default`.
+   */
+  SwitchCase getCase(int i) {
+    result =
+      rank[i + 1](SwitchCase case, int idx | case.isNthChildOf(this, idx) | case order by idx)
+  }
+
+  /**
    * Gets a case of this `switch` expression,
    * which may be either a normal `case` or a `default`.
    */
-  SwitchCase getACase() { result = this.getAConstCase() or result = this.getDefaultCase() }
+  SwitchCase getACase() { result.getParent() = this }
 
   /** Gets a (non-default) `case` of this `switch` expression. */
-  ConstCase getAConstCase() { result.getParent() = this }
+  ConstCase getAConstCase() { result = this.getACase() }
 
-  /** Gets the `default` case of this switch expression, if any. */
-  DefaultCase getDefaultCase() { result.getParent() = this }
+  /** Gets a (non-default) pattern `case` of this `switch` expression. */
+  PatternCase getAPatternCase() { result = this.getACase() }
+
+  /**
+   * Gets the `default` case of this switch statement, if any.
+   *
+   * Note this may be `default` or `case null, default`.
+   */
+  DefaultCase getDefaultCase() { result = this.getACase() }
 
   /** Gets the expression of this `switch` expression. */
   Expr getExpr() { result.getParent() = this }
@@ -1387,7 +1536,13 @@ class SwitchExpr extends Expr, StmtParent, @switchexpr {
   Expr getAResult() {
     result = this.getACase().getRuleExpression()
     or
-    exists(YieldStmt yield | yield.(JumpStmt).getTarget() = this and result = yield.getValue())
+    exists(YieldStmt yield | yield.getTarget() = this and result = yield.getValue())
+  }
+
+  /** Holds if this switch has a case handling a null literal. */
+  predicate hasNullCase() {
+    this.getAConstCase().getValue(_) instanceof NullLiteral or
+    this.getACase() instanceof NullDefaultCase
   }
 
   /** Gets a printable representation of this expression. */
@@ -1399,27 +1554,63 @@ class SwitchExpr extends Expr, StmtParent, @switchexpr {
 /** An `instanceof` expression. */
 class InstanceOfExpr extends Expr, @instanceofexpr {
   /** Gets the expression on the left-hand side of the `instanceof` operator. */
-  Expr getExpr() {
-    if this.isPattern()
-    then result = this.getLocalVariableDeclExpr().getInit()
-    else result.isNthChildOf(this, 0)
-  }
+  Expr getExpr() { result.isNthChildOf(this, 0) }
+
+  /**
+   * Gets the pattern of an `x instanceof T pattern` expression, if any.
+   */
+  PatternExpr getPattern() { result.isNthChildOf(this, 2) }
 
   /**
    * Holds if this `instanceof` expression uses pattern matching.
    */
-  predicate isPattern() { exists(this.getLocalVariableDeclExpr()) }
+  predicate isPattern() { exists(this.getPattern()) }
 
   /**
-   * Gets the local variable declaration of this `instanceof` expression if pattern matching is used.
+   * Gets the local variable declaration of this `instanceof` expression if simple pattern matching is used.
+   *
+   * Note that this won't get anything when record pattern matching is used-- for more general patterns,
+   * use `getPattern`.
    */
-  LocalVariableDeclExpr getLocalVariableDeclExpr() { result.isNthChildOf(this, 0) }
+  LocalVariableDeclExpr getLocalVariableDeclExpr() {
+    result = this.getPattern().asBindingOrUnnamedPattern()
+  }
 
-  /** Gets the access to the type on the right-hand side of the `instanceof` operator. */
+  /**
+   * Gets the access to the type on the right-hand side of the `instanceof` operator.
+   *
+   * This does not match record patterns, which have a record pattern (use `getPattern`) not a type access.
+   */
   Expr getTypeName() { result.isNthChildOf(this, 1) }
 
-  /** Gets the type this `instanceof` expression checks for. */
-  RefType getCheckedType() { result = this.getTypeName().getType() }
+  /**
+   * Gets the type this `instanceof` expression checks for.
+   *
+   * For a match against a record pattern, this is the type of the outermost record type, and only holds if
+   * the record pattern matches that type unconditionally, i.e. it does not restrict field types more tightly
+   * than the fields' declared types and therefore match a subset of `rpe.getType()`.
+   */
+  RefType getCheckedType() {
+    result = this.getTypeName().getType()
+    or
+    exists(RecordPatternExpr rpe | rpe = this.getPattern().asRecordPattern() |
+      result = rpe.getType() and rpe.isUnrestricted()
+    )
+  }
+
+  /**
+   * Gets the type this `instanceof` expression checks for.
+   *
+   * For a match against a record pattern, this is the type of the outermost record type. Note that because
+   * the record match might additionally constrain field or sub-record fields to have a more specific type,
+   * and so while if the `instanceof` test passes we know that `this.getExpr()` has this type, if it fails
+   * we do not know that it doesn't.
+   */
+  RefType getSyntacticCheckedType() {
+    result = this.getTypeName().getType()
+    or
+    result = this.getPattern().asRecordPattern().getType()
+  }
 
   /** Gets a printable representation of this expression. */
   override string toString() { result = "...instanceof..." }
@@ -1427,11 +1618,33 @@ class InstanceOfExpr extends Expr, @instanceofexpr {
   override string getAPrimaryQlClass() { result = "InstanceOfExpr" }
 }
 
+// TODO: Should this be desugared into instanceof.not()?
+// Note expressions/IrTypeOperatorCall.kt says:
+//     NOT_INSTANCEOF, // TODO drop and replace with `INSTANCEOF<T>(x).not()`?
+/** An `instanceof` expression. */
+class NotInstanceOfExpr extends Expr, @notinstanceofexpr {
+  /** Gets the expression on the left-hand side of the `!is` operator. */
+  Expr getExpr() { result.isNthChildOf(this, 0) }
+
+  /** Gets the access to the type on the right-hand side of the `!is` operator. */
+  Expr getTypeName() { result.isNthChildOf(this, 1) }
+
+  /** Gets the type this `!is` expression checks for. */
+  RefType getCheckedType() { result = this.getTypeName().getType() }
+
+  /** Gets a printable representation of this expression. */
+  override string toString() { result = "... !is ..." }
+
+  override string getAPrimaryQlClass() { result = "NotInstanceOfExpr" }
+}
+
 /**
  * A local variable declaration expression.
  *
  * Contexts in which such expressions may occur include
- * local variable declaration statements and `for` loops.
+ * local variable declaration statements, `for` loops,
+ * and binding patterns such as `if (x instanceof T t)` and
+ * `case String s:`.
  */
 class LocalVariableDeclExpr extends Expr, @localvariabledeclexpr {
   /** Gets an access to the variable declared by this local variable declaration expression. */
@@ -1451,24 +1664,105 @@ class LocalVariableDeclExpr extends Expr, @localvariabledeclexpr {
     exists(EnhancedForStmt efs | efs.getVariable() = this | result.isNthChildOf(efs, -1))
     or
     exists(InstanceOfExpr ioe | this.getParent() = ioe | result.isNthChildOf(ioe, 1))
+    or
+    exists(PatternCase pc, int index, int typeAccessIdx | this.isNthChildOf(pc, index) |
+      (if index = 0 then typeAccessIdx = -2 else typeAccessIdx = (-3 - index)) and
+      result.isNthChildOf(pc, typeAccessIdx)
+    )
+    or
+    exists(RecordPatternExpr rpe, int index |
+      this.isNthChildOf(rpe, index) and result.isNthChildOf(rpe, -(index + 1))
+    )
   }
 
   /** Gets the name of the variable declared by this local variable declaration expression. */
   string getName() { result = this.getVariable().getName() }
 
-  /** Gets the initializer expression of this local variable declaration expression, if any. */
+  /** Holds if this is an anonymous local variable, `_` */
+  predicate isAnonymous() { this.getName() = "" }
+
+  /**
+   * Gets the switch statement or expression whose pattern declares this identifier, if any.
+   */
+  SwitchBlock getAssociatedSwitch() {
+    exists(PatternCase pc |
+      pc = result.(SwitchStmt).getAPatternCase()
+      or
+      pc = result.(SwitchExpr).getAPatternCase()
+    |
+      this = pc.getAPattern().getAChildExpr*()
+    )
+  }
+
+  /** Holds if this is a declaration stemming from a pattern switch case. */
+  predicate hasAssociatedSwitch() { exists(this.getAssociatedSwitch()) }
+
+  /**
+   * Gets the instanceof expression whose pattern declares this identifier, if any.
+   */
+  InstanceOfExpr getAssociatedInstanceOfExpr() { result.getPattern().getAChildExpr*() = this }
+
+  /** Holds if this is a declaration stemming from a pattern instanceof expression. */
+  predicate hasAssociatedInstanceOfExpr() { exists(this.getAssociatedInstanceOfExpr()) }
+
+  /**
+   * Gets the initializer expression of this local variable declaration expression, if any.
+   *
+   * Note this applies specifically to a syntactic initialization like `T varname = init`;
+   * to include also `e instanceof T varname` and `switch(e) ... case T varname`, which both
+   * have the effect of initializing `varname` to a known local expression without using
+   * that syntax, use `getInitOrPatternSource`.
+   */
   Expr getInit() { result.isNthChildOf(this, 0) }
+
+  /**
+   * Gets the local expression that initializes this variable declaration, if any.
+   *
+   * Note this includes explicit `T varname = init;`, as well as `e instanceof T varname`
+   * and `switch(e) ... case T varname`. To get only explicit initializers, use `getInit`.
+   *
+   * Note that record pattern variables like `e instance of T Record(T varname)` do not have
+   * either an explicit initializer or a pattern source.
+   */
+  Expr getInitOrPatternSource() {
+    result = this.getInit()
+    or
+    exists(SwitchStmt switch |
+      result = switch.getExpr() and
+      this = switch.getAPatternCase().getAPattern().asBindingOrUnnamedPattern()
+    )
+    or
+    exists(SwitchExpr switch |
+      result = switch.getExpr() and
+      this = switch.getAPatternCase().getAPattern().asBindingOrUnnamedPattern()
+    )
+    or
+    exists(InstanceOfExpr ioe |
+      result = ioe.getExpr() and
+      this = ioe.getPattern().asBindingOrUnnamedPattern()
+    )
+  }
 
   /** Holds if this variable declaration implicitly initializes the variable. */
   predicate hasImplicitInit() {
-    exists(CatchClause cc | cc.getVariable() = this) or
+    exists(CatchClause cc | cc.getVariable() = this)
+    or
     exists(EnhancedForStmt efs | efs.getVariable() = this)
+    or
+    this.getParent() instanceof RecordPatternExpr
   }
 
   /** Gets a printable representation of this expression. */
-  override string toString() { result = this.getName() }
+  override string toString() {
+    if this.getName() = "" then result = "<anonymous local variable>" else result = this.getName()
+  }
 
   override string getAPrimaryQlClass() { result = "LocalVariableDeclExpr" }
+}
+
+/** A local variable declaration that occurs within a record pattern. */
+class RecordBindingVariableExpr extends LocalVariableDeclExpr {
+  RecordBindingVariableExpr() { this.getParent() instanceof RecordPatternExpr }
 }
 
 /** An update of a variable or an initialization of the variable. */
@@ -1489,6 +1783,9 @@ class VariableUpdate extends Expr {
 
 /**
  * An assignment to a variable or an initialization of the variable.
+ *
+ * This does not cover compound assignments such as `i += 1`, or unary
+ * assignments such as `i++`; use the class `VariableUpdate` for that.
  */
 class VariableAssign extends VariableUpdate {
   VariableAssign() {
@@ -1499,12 +1796,12 @@ class VariableAssign extends VariableUpdate {
   /**
    * Gets the source (right-hand side) of this assignment, if any.
    *
-   * An initialization in a `CatchClause` or `EnhancedForStmt` is implicit and
-   * does not have a source.
+   * An initialization in a `CatchClause`, `EnhancedForStmt` or `RecordPatternExpr`
+   * is implicit and does not have a source.
    */
   Expr getSource() {
     result = this.(AssignExpr).getSource() or
-    result = this.(LocalVariableDeclExpr).getInit()
+    result = this.(LocalVariableDeclExpr).getInitOrPatternSource()
   }
 }
 
@@ -1520,7 +1817,9 @@ class TypeLiteral extends Expr, @typeliteral {
   Type getReferencedType() { result = this.getTypeName().getType() }
 
   /** Gets a printable representation of this expression. */
-  override string toString() { result = this.getTypeName().toString() + ".class" }
+  override string toString() {
+    result = pragma[only_bind_out](this.getTypeName()).toString() + ".class"
+  }
 
   override string getAPrimaryQlClass() { result = "TypeLiteral" }
 }
@@ -1547,12 +1846,24 @@ abstract class InstanceAccess extends Expr {
   /** Holds if this instance access is to an enclosing instance of type `t`. */
   predicate isEnclosingInstanceAccess(RefType t) {
     t = this.getQualifier().getType().(RefType).getSourceDeclaration() and
-    t != this.getEnclosingCallable().getDeclaringType()
+    t != this.getEnclosingCallable().getDeclaringType() and
+    not this.isSuperInterfaceAccess()
     or
-    not exists(this.getQualifier()) and
+    (not exists(this.getQualifier()) or this.isSuperInterfaceAccess()) and
     exists(LambdaExpr lam | lam.asMethod() = this.getEnclosingCallable() |
       t = lam.getAnonymousClass().getEnclosingType()
     )
+  }
+
+  // A default method on an interface, `I`, may be invoked using `I.super.m()`.
+  // This always refers to the implemented interfaces of `this`. This form of
+  // qualified `super` cannot be combined with accessing an enclosing instance.
+  // JLS 15.11.2. "Accessing Superclass Members using super"
+  // JLS 15.12. "Method Invocation Expressions"
+  // JLS 15.12.1. "Compile-Time Step 1: Determine Type to Search"
+  private predicate isSuperInterfaceAccess() {
+    this instanceof SuperAccess and
+    this.getQualifier().getType().(RefType).getSourceDeclaration() instanceof Interface
   }
 }
 
@@ -1604,31 +1915,30 @@ class VarAccess extends Expr, @varaccess {
   Variable getVariable() { variableBinding(this, result) }
 
   /**
-   * Holds if this variable access is an l-value.
+   * Holds if this variable access is a write access.
    *
-   * An l-value is a write access to a variable, which occurs as the destination of an assignment.
+   * That means the access is the destination of an assignment.
    */
-  predicate isLValue() {
+  predicate isVarWrite() {
     exists(Assignment a | a.getDest() = this) or
     exists(UnaryAssignExpr e | e.getExpr() = this)
   }
 
   /**
-   * Holds if this variable access is an r-value.
+   * Holds if this variable access is a read access.
    *
-   * An r-value is a read access to a variable.
    * In other words, it is a variable access that does _not_ occur as the destination of
    * a simple assignment, but it may occur as the destination of a compound assignment
    * or a unary assignment.
    */
-  predicate isRValue() { not exists(AssignExpr a | a.getDest() = this) }
+  predicate isVarRead() { not exists(AssignExpr a | a.getDest() = this) }
 
   /** Gets a printable representation of this expression. */
   override string toString() {
     exists(Expr q | q = this.getQualifier() |
       if q.isParenthesized()
       then result = "(...)." + this.getVariable().getName()
-      else result = q.toString() + "." + this.getVariable().getName()
+      else result = pragma[only_bind_out](q).toString() + "." + this.getVariable().getName()
     )
     or
     not this.hasQualifier() and result = this.getVariable().getName()
@@ -1651,37 +1961,56 @@ class VarAccess extends Expr, @varaccess {
 }
 
 /**
- * An l-value is a write access to a variable, which occurs as the destination of an assignment.
+ * An access to an extension receiver parameter. This is a parameter access that takes the form of `this` in Kotlin.
  */
-class LValue extends VarAccess {
-  LValue() { this.isLValue() }
+class ExtensionReceiverAccess extends VarAccess {
+  ExtensionReceiverAccess() {
+    exists(Parameter p |
+      this.getVariable() = p and
+      p.isExtensionParameter()
+    )
+  }
+
+  override string getAPrimaryQlClass() { result = "ExtensionReceiverAccess" }
+
+  override string toString() { result = "this" }
+}
+
+/**
+ * A write access to a variable, which occurs as the destination of an assignment.
+ *
+ * This does not cover the initialization of local variables at their declaration,
+ * use the class `VariableUpdate` if you want to cover that as well.
+ */
+class VarWrite extends VarAccess {
+  VarWrite() { this.isVarWrite() }
 
   /**
-   * Gets a source expression used in an assignment to this l-value.
+   * Gets a source of the assignment that executes this variable write.
    *
    * For assignments using the `=` operator, the source expression
    * is simply the RHS of the assignment.
    *
-   * Note that for l-values occurring on the LHS of compound assignment operators
+   * Note that for writes occurring on the LHS of compound assignment operators
    * (such as (`+=`), both the RHS and the LHS of the compound assignment
    * are source expressions of the assignment.
    */
-  Expr getRHS() { exists(Assignment e | e.getDest() = this and e.getSource() = result) }
+  Expr getASource() { exists(Assignment e | e.getDest() = this and e.getSource() = result) }
 }
 
 /**
- * An r-value is a read access to a variable.
+ * A read access to a variable.
  *
  * In other words, it is a variable access that does _not_ occur as the destination of
  * a simple assignment, but it may occur as the destination of a compound assignment
  * or a unary assignment.
  */
-class RValue extends VarAccess {
-  RValue() { this.isRValue() }
+class VarRead extends VarAccess {
+  VarRead() { this.isVarRead() }
 }
 
-/** A method access is an invocation of a method with a list of arguments. */
-class MethodAccess extends Expr, Call, @methodaccess {
+/** A method call is an invocation of a method with a list of arguments. */
+class MethodCall extends Expr, Call, @methodaccess {
   /** Gets the qualifying expression of this method access, if any. */
   override Expr getQualifier() { result.isNthChildOf(this, -1) }
 
@@ -1713,7 +2042,11 @@ class MethodAccess extends Expr, Call, @methodaccess {
   override Stmt getEnclosingStmt() { result = Expr.super.getEnclosingStmt() }
 
   /** Gets a printable representation of this expression. */
-  override string toString() { result = this.printAccess() }
+  override string toString() {
+    if exists(this.getMethod())
+    then result = this.printAccess()
+    else result = "<Call to unknown method>"
+  }
 
   /** Gets a printable representation of this expression. */
   string printAccess() { result = this.getMethod().getName() + "(...)" }
@@ -1729,19 +2062,19 @@ class MethodAccess extends Expr, Call, @methodaccess {
   }
 
   /**
-   * Holds if this is a method access to an instance method of `this`. That is,
+   * Holds if this is a method call to an instance method of `this`. That is,
    * the qualifier is either an explicit or implicit unqualified `this` or `super`.
    */
-  predicate isOwnMethodAccess() { Qualifier::ownMemberAccess(this) }
+  predicate isOwnMethodCall() { Qualifier::ownMemberAccess(this) }
 
   /**
-   * Holds if this is a method access to an instance method of the enclosing
+   * Holds if this is a method call to an instance method of the enclosing
    * class `t`. That is, the qualifier is either an explicit or implicit
    * `t`-qualified `this` or `super`.
    */
-  predicate isEnclosingMethodAccess(RefType t) { Qualifier::enclosingMemberAccess(this, t) }
+  predicate isEnclosingMethodCall(RefType t) { Qualifier::enclosingMemberAccess(this, t) }
 
-  override string getAPrimaryQlClass() { result = "MethodAccess" }
+  override string getAPrimaryQlClass() { result = "MethodCall" }
 }
 
 /** A type access is a (possibly qualified) reference to a type. */
@@ -1750,7 +2083,7 @@ class TypeAccess extends Expr, Annotatable, @typeaccess {
   Expr getQualifier() { result.isNthChildOf(this, -1) }
 
   /** Holds if this type access has a qualifier. */
-  predicate hasQualifier() { exists(Expr e | e = this.getQualifier()) }
+  predicate hasQualifier() { exists(this.getQualifier()) }
 
   /** Gets a type argument supplied to this type access. */
   Expr getATypeArgument() { result.getIndex() >= 0 and result.getParent() = this }
@@ -1762,16 +2095,22 @@ class TypeAccess extends Expr, Annotatable, @typeaccess {
   }
 
   /** Holds if this type access has a type argument. */
-  predicate hasTypeArgument() { exists(Expr e | e = this.getATypeArgument()) }
+  predicate hasTypeArgument() { exists(this.getATypeArgument()) }
 
   /** Gets the compilation unit in which this type access occurs. */
   override CompilationUnit getCompilationUnit() { result = Expr.super.getCompilationUnit() }
 
-  /** Gets a printable representation of this expression. */
-  override string toString() {
+  private string toNormalString() {
     result = this.getQualifier().toString() + "." + this.getType().toString()
     or
     not this.hasQualifier() and result = this.getType().toString()
+  }
+
+  /** Gets a printable representation of this expression. */
+  override string toString() {
+    if this.getType() instanceof ErrorType
+    then result = "<TypeAccess of ErrorType>"
+    else result = this.toNormalString()
   }
 
   override string getAPrimaryQlClass() { result = "TypeAccess" }
@@ -1905,21 +2244,21 @@ class Call extends ExprParent, @caller {
 }
 
 /** A polymorphic call to an instance method. */
-class VirtualMethodAccess extends MethodAccess {
-  VirtualMethodAccess() {
+class VirtualMethodCall extends MethodCall {
+  VirtualMethodCall() {
     this.getMethod().isVirtual() and
     not this.getQualifier() instanceof SuperAccess
   }
 }
 
 /** A static method call. */
-class StaticMethodAccess extends MethodAccess {
-  StaticMethodAccess() { this.getMethod().isStatic() }
+class StaticMethodCall extends MethodCall {
+  StaticMethodCall() { this.getMethod().isStatic() }
 }
 
 /** A call to a method in the superclass. */
-class SuperMethodAccess extends MethodAccess {
-  SuperMethodAccess() { this.getQualifier() instanceof SuperAccess }
+class SuperMethodCall extends MethodCall {
+  SuperMethodCall() { this.getQualifier() instanceof SuperAccess }
 }
 
 /**
@@ -1970,23 +2309,23 @@ private module Qualifier {
     TThis() or
     TEnclosing(RefType t)
 
-  /** An expression that accesses a member. That is, either a `FieldAccess` or a `MethodAccess`. */
+  /** An expression that accesses a member. That is, either a `FieldAccess` or a `MethodCall`. */
   class MemberAccess extends Expr {
     MemberAccess() {
       this instanceof FieldAccess or
-      this instanceof MethodAccess
+      this instanceof MethodCall
     }
 
     /** Gets the member accessed by this member access. */
     Member getMember() {
       result = this.(FieldAccess).getField() or
-      result = this.(MethodAccess).getMethod()
+      result = this.(MethodCall).getMethod()
     }
 
     /** Gets the qualifier of this member access, if any. */
     Expr getQualifier() {
       result = this.(FieldAccess).getQualifier() or
-      result = this.(MethodAccess).getQualifier()
+      result = this.(MethodCall).getQualifier()
     }
   }
 
@@ -2056,10 +2395,10 @@ private module Qualifier {
 }
 
 /** An expression that assigns a value to a field. */
-class FieldWrite extends FieldAccess, LValue { }
+class FieldWrite extends FieldAccess, VarWrite { }
 
 /** An expression that reads a field. */
-class FieldRead extends FieldAccess, RValue { }
+class FieldRead extends FieldAccess, VarRead { }
 
 private predicate hasInstantiation(RefType t) {
   t instanceof TypeVariable or
@@ -2088,12 +2427,11 @@ class Argument extends Expr {
   predicate isExplicitVarargsArray() {
     exists(Array typ, Parameter p, Type ptyp |
       typ = this.getType() and
-      pos = call.getNumArgument() - 1 and
       call.getCallee().getParameter(pos) = p and
       p.isVarargs() and
       ptyp = p.getType() and
       (
-        hasSubtype*(ptyp, typ)
+        hasDescendant(ptyp, typ)
         or
         // If the types don't match then we'll guess based on whether there are type variables involved.
         hasInstantiation(ptyp.(Array).getComponentType())
@@ -2112,9 +2450,252 @@ class Argument extends Expr {
     not this.isExplicitVarargsArray() and
     exists(Callable tgt |
       call.getCallee() = tgt and
-      tgt.isVarargs() and
-      arrayindex = pos - tgt.getNumberOfParameters() + 1 and
-      arrayindex >= 0
+      arrayindex = pos - tgt.getVaragsParameterIndex() and
+      arrayindex >= 0 and
+      arrayindex <= call.getNumArgument() - tgt.getNumberOfParameters()
+    )
+  }
+
+  /**
+   * Gets the parameter position that will receive this argument.
+   *
+   * For all vararg arguments, this is the position of the vararg array parameter.
+   */
+  int getParameterPos() {
+    exists(Callable c | c = call.getCallee() |
+      if c.isVarargs()
+      then
+        if pos < c.getVaragsParameterIndex()
+        then result = pos // Vararg method argument, before the vararg parameter
+        else (
+          if this.isVararg()
+          then result = c.getVaragsParameterIndex() // Part of the implicit vararg array
+          else result = pos - (call.getNumArgument() - c.getNumberOfParameters()) // Vararg method argument, after the vararg parameter (offset could be -1 in the zero-vararg case)
+        )
+      else result = pos // Not a vararg method
+    )
+  }
+}
+
+/**
+ * An expression for which the value of the expression as a whole is discarded. Only cases
+ * of discarded values at the language level (as described by the JLS) are considered;
+ * data flow, for example to determine if an assigned variable value is ever read, is not
+ * considered. Such expressions can for example appear as part of an `ExprStmt` or as
+ * initializer of a `for` loop.
+ *
+ * For example, for the statement `i++;` the value of the increment expression, that is the
+ * old value of variable `i`, is discarded. Whereas for the statement `println(i++);` the
+ * value of the increment expression is not discarded but used as argument for the method call.
+ */
+class ValueDiscardingExpr extends Expr {
+  ValueDiscardingExpr() {
+    (
+      this = any(ExprStmt s).getExpr()
+      or
+      this = any(ForStmt s).getAnInit() and not this instanceof LocalVariableDeclExpr
+      or
+      this = any(ForStmt s).getAnUpdate()
+      or
+      // Only applies to SwitchStmt, but not to SwitchExpr, see JLS 17 section 14.11.2
+      this = any(SwitchStmt s).getACase().getRuleExpression()
+      or
+      // TODO: Workarounds for https://github.com/github/codeql/issues/3605
+      exists(LambdaExpr lambda |
+        this = lambda.getExprBody() and
+        lambda.asMethod().getReturnType() instanceof VoidType
+      )
+      or
+      exists(MemberRefExpr memberRef, Method implicitMethod, Method overridden |
+        implicitMethod = memberRef.asMethod()
+      |
+        this.getParent().(ReturnStmt).getEnclosingCallable() = implicitMethod and
+        // asMethod() has bogus method with wrong return type as result, e.g. `run(): String` (overriding `Runnable.run(): void`)
+        // Therefore need to check the overridden method
+        implicitMethod.getSourceDeclaration().overridesOrInstantiates*(overridden) and
+        overridden.getReturnType() instanceof VoidType
+      )
+    ) and
+    // Ignore if this expression is a method call with `void` as return type
+    not this.getType() instanceof VoidType
+  }
+}
+
+/** A Kotlin `when` expression. */
+class WhenExpr extends Expr, StmtParent, @whenexpr {
+  override string toString() { result = "when ..." }
+
+  override string getHalsteadID() { result = "WhenExpr" }
+
+  override string getAPrimaryQlClass() { result = "WhenExpr" }
+
+  /** Gets the `i`th branch. */
+  WhenBranch getBranch(int i) { result.isNthChildOf(this, i) }
+
+  /** Holds if this was written as an `if` expression. */
+  predicate isIf() { when_if(this) }
+}
+
+/** A Kotlin `when` branch. */
+class WhenBranch extends Stmt, @whenbranch {
+  /** Gets the condition of this branch. */
+  Expr getCondition() { result.isNthChildOf(this, 0) }
+
+  /** Gets the result of this branch. */
+  Stmt getRhs() { result.isNthChildOf(this, 1) }
+
+  /** Gets a result expression of this `when` branch. */
+  Expr getAResult() { result = getAResult(this.getRhs()) }
+
+  /** Holds if this is an `else` branch. */
+  predicate isElseBranch() { when_branch_else(this) }
+
+  /** Gets the `when` expression this is a branch of. */
+  WhenExpr getWhenExpr() { this = result.getBranch(_) }
+
+  override string toString() { result = "... -> ..." }
+
+  override string getAPrimaryQlClass() { result = "WhenBranch" }
+}
+
+// TODO: This might need more cases. It might be better as a predicate
+// on Stmt, overridden in each subclass.
+private Expr getAResult(Stmt s) {
+  result = s.(ExprStmt).getExpr() or
+  result = getAResult(s.(BlockStmt).getLastStmt())
+}
+
+/** A Kotlin `::class` expression. */
+class ClassExpr extends Expr, @getclassexpr {
+  /** Gets the expression whose class is being returned. */
+  Expr getExpr() { result.isNthChildOf(this, 0) }
+
+  override string toString() { result = "::class" }
+
+  override string getAPrimaryQlClass() { result = "ClassExpr" }
+}
+
+/**
+ * A statement expression.
+ *
+ * In some contexts, a Kotlin expression can contain a statement.
+ */
+class StmtExpr extends Expr, @stmtexpr {
+  /** Gets the statement of this statement expression. */
+  Stmt getStmt() { result.getParent() = this }
+
+  override string toString() { result = "<Stmt>" }
+
+  override string getHalsteadID() { result = "StmtExpr" }
+
+  override string getAPrimaryQlClass() { result = "StmtExpr" }
+
+  /**
+   * Gets the result expression of the enclosed statement.
+   */
+  Expr getResultExpr() { result = getStmtResultExpr(this.getStmt()) }
+}
+
+private Expr getStmtResultExpr(Stmt stmt) {
+  result = stmt.(ExprStmt).getExpr() or
+  result = getStmtResultExpr(stmt.(BlockStmt).getLastStmt())
+}
+
+/**
+ * A Kotlin string template expression. For example, `"foo${bar}baz"`.
+ */
+class StringTemplateExpr extends Expr, @stringtemplateexpr {
+  /**
+   * Gets the `i`th component of this string template.
+   *
+   * For example, in the string template `"foo${bar}baz"`, the 0th
+   * component is the string literal `"foo"`, the 1st component is
+   * the variable access `bar`, and the 2nd component is the string
+   * literal `"bar"`.
+   */
+  Expr getComponent(int i) { result.isNthChildOf(this, i) }
+
+  override string toString() { result = "\"...\"" }
+
+  override string getHalsteadID() { result = "StringTemplateExpr" }
+
+  override string getAPrimaryQlClass() { result = "StringTemplateExpr" }
+}
+
+/** A Kotlin not-null expression. For example, `expr!!`. */
+class NotNullExpr extends UnaryExpr, @notnullexpr {
+  override string toString() { result = "...!!" }
+
+  override string getAPrimaryQlClass() { result = "NotNullExpr" }
+}
+
+/**
+ * A binding, unnamed or record pattern.
+ *
+ * Note binding and unnamed patterns are represented as `LocalVariableDeclExpr`s.
+ */
+class PatternExpr extends Expr {
+  PatternExpr() {
+    (
+      this.getParent() instanceof SwitchCase or
+      this.getParent() instanceof InstanceOfExpr or
+      this.getParent() instanceof RecordPatternExpr
+    ) and
+    (this instanceof LocalVariableDeclExpr or this instanceof RecordPatternExpr)
+  }
+
+  /**
+   * Gets this pattern cast to a binding or unnamed pattern.
+   */
+  LocalVariableDeclExpr asBindingOrUnnamedPattern() { result = this }
+
+  /**
+   * DEPRECATED: alias for `asBindingOrUnnamedPattern`.
+   */
+  deprecated LocalVariableDeclExpr asBindingPattern() { result = this.asBindingOrUnnamedPattern() }
+
+  /**
+   * Gets this pattern cast to a record pattern.
+   */
+  RecordPatternExpr asRecordPattern() { result = this }
+}
+
+/** A record pattern expr, as in `if (x instanceof SomeRecord(int field))`. */
+class RecordPatternExpr extends Expr, @recordpatternexpr {
+  override string toString() { result = this.getType().toString() + "(...)" }
+
+  override string getAPrimaryQlClass() { result = "RecordPatternExpr" }
+
+  /**
+   * Gets the `i`th subpattern of this record pattern.
+   */
+  PatternExpr getSubPattern(int i) { result.isNthChildOf(this, i) }
+
+  /**
+   * Holds if this record pattern matches any record of its type.
+   *
+   * For example, for `record R(Object o) { }`, pattern `R(Object o)` is unrestricted, whereas
+   * pattern `R(String s)` is not because it matches a subset of `R` instances, those containing `String`s.
+   */
+  predicate isUnrestricted() {
+    forall(PatternExpr subPattern, int idx | subPattern = this.getSubPattern(idx) |
+      subPattern.getType() =
+        this.getType().(Record).getCanonicalConstructor().getParameter(idx).getType() and
+      (
+        subPattern instanceof LocalVariableDeclExpr
+        or
+        subPattern.(RecordPatternExpr).isUnrestricted()
+      )
+    )
+  }
+
+  /**
+   * Holds if this record pattern declares any identifiers (i.e., at least one leaf declaration is named).
+   */
+  predicate declaresAnyIdentifiers() {
+    exists(PatternExpr subPattern | subPattern = this.getSubPattern(_) |
+      subPattern.asRecordPattern().declaresAnyIdentifiers() or
+      not subPattern.asBindingOrUnnamedPattern().isAnonymous()
     )
   }
 }

@@ -17,13 +17,15 @@ public class TypeScriptExtractor implements IExtractor {
   }
 
   @Override
-  public LoCInfo extract(TextualExtractor textualExtractor) {
+  public ParseResultInfo extract(TextualExtractor textualExtractor) {
     LocationManager locationManager = textualExtractor.getLocationManager();
     String source = textualExtractor.getSource();
     File sourceFile = textualExtractor.getExtractedFile();
     Result res = state.getTypeScriptParser().parse(sourceFile, source, textualExtractor.getMetrics());
-    ScopeManager scopeManager =
-        new ScopeManager(textualExtractor.getTrapwriter(), ECMAVersion.ECMA2017, false);
+    ScopeManager.FileKind fileKind = sourceFile.getName().endsWith(".d.ts")
+        ? ScopeManager.FileKind.TYPESCRIPT_DECLARATION
+        : ScopeManager.FileKind.PLAIN;
+    ScopeManager scopeManager = new ScopeManager(textualExtractor.getTrapwriter(), ECMAVersion.ECMA2017, fileKind);
     try {
       FileSnippet snippet = state.getSnippets().get(sourceFile.toPath());
       SourceType sourceType = snippet != null ? snippet.getSourceType() : jsExtractor.establishSourceType(source, false);

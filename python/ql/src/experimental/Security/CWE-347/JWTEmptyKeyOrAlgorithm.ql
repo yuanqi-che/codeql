@@ -5,6 +5,7 @@
  * @problem.severity warning
  * @id py/jwt-empty-secret-or-algorithm
  * @tags security
+ *       experimental
  */
 
 // determine precision above
@@ -12,7 +13,7 @@ import python
 import experimental.semmle.python.Concepts
 import experimental.semmle.python.frameworks.JWT
 
-from JWTEncoding jwtEncoding, string affectedComponent
+from JwtEncoding jwtEncoding, string affectedComponent
 where
   affectedComponent = "algorithm" and
   isEmptyOrNone(jwtEncoding.getAlgorithm())

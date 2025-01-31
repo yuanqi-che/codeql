@@ -3,12 +3,10 @@
  */
 
 import csharp
-private import cil
-private import dotnet
 private import ControlFlow::SuccessorTypes
 private import semmle.code.csharp.commons.Assertions
 private import semmle.code.csharp.commons.ComparisonTest
-private import semmle.code.csharp.commons.StructuralComparison::Internal
+private import semmle.code.csharp.commons.StructuralComparison as SC
 private import semmle.code.csharp.controlflow.BasicBlocks
 private import semmle.code.csharp.controlflow.internal.Completion
 private import semmle.code.csharp.frameworks.System
@@ -33,11 +31,19 @@ class Guard extends Expr {
   }
 
   /**
+   * Holds if `cfn` is guarded by this expression having value `v`.
+   *
+   * Note: This predicate is inlined.
+   */
+  pragma[inline]
+  predicate controlsNode(ControlFlow::Nodes::ElementNode cfn, AbstractValue v) {
+    guardControls(this, cfn.getBasicBlock(), v)
+  }
+
+  /**
    * Holds if basic block `bb` is guarded by this expression having value `v`.
    */
-  predicate controlsBasicBlock(BasicBlock bb, AbstractValue v) {
-    Internal::guardControls(this, bb, v)
-  }
+  predicate controlsBasicBlock(BasicBlock bb, AbstractValue v) { guardControls(this, bb, v) }
 
   /**
    * Holds if this guard is an equality test between `e1` and `e2`. If the test is
@@ -46,7 +52,7 @@ class Guard extends Expr {
    */
   predicate isEquality(Expr e1, Expr e2, boolean polarity) {
     exists(BooleanValue v |
-      this = Internal::getAnEqualityCheck(e1, v, e2) and
+      this = getAnEqualityCheck(e1, v, e2) and
       polarity = v.getValue()
     )
   }
@@ -473,11 +479,16 @@ class DereferenceableExpr extends Expr {
 }
 
 /**
+ * DEPRECATED: Use `EnumerableCollectionExpr` instead.
+ */
+deprecated class CollectionExpr = EnumerableCollectionExpr;
+
+/**
  * An expression that evaluates to a collection. That is, an expression whose
  * (transitive, reflexive) base type is `IEnumerable`.
  */
-class CollectionExpr extends Expr {
-  CollectionExpr() {
+class EnumerableCollectionExpr extends Expr {
+  EnumerableCollectionExpr() {
     this.getType().(ValueOrRefType).getABaseType*() instanceof SystemCollectionsIEnumerableInterface
   }
 
@@ -831,8 +842,6 @@ class NullGuardedDataFlowNode extends GuardedDataFlowNode {
 
 /** INTERNAL: Do not use. */
 module Internal {
-  private import semmle.code.cil.CallableReturns
-
   newtype TAbstractValue =
     TBooleanValue(boolean b) { b = true or b = false } or
     TIntegerValue(int i) { i = any(Expr e).getValue().toInt() } or
@@ -843,20 +852,11 @@ module Internal {
     } or
     TEmptyCollectionValue(boolean b) { b = true or b = false }
 
-  /** A callable that always returns a `null` value. */
-  private class NullCallable extends Callable {
-    NullCallable() {
-      exists(CIL::Method m | m.matchesHandle(this) | alwaysNullMethod(m) and not m.isVirtual())
-    }
-  }
-
   /** Holds if expression `e` is a `null` value. */
   predicate nullValue(Expr e) {
     e instanceof NullLiteral
     or
     e instanceof DefaultValueExpr and e.getType().isRefType()
-    or
-    e.(Call).getTarget().getUnboundDeclaration() instanceof NullCallable
   }
 
   /** Holds if expression `e2` is a `null` value whenever `e1` is. */
@@ -877,11 +877,7 @@ module Internal {
 
   /** A callable that always returns a non-`null` value. */
   private class NonNullCallable extends Callable {
-    NonNullCallable() {
-      exists(CIL::Method m | m.matchesHandle(this) | alwaysNotNullMethod(m) and not m.isVirtual())
-      or
-      this = any(SystemObjectClass c).getGetTypeMethod()
-    }
+    NonNullCallable() { this = any(SystemObjectClass c).getGetTypeMethod() }
   }
 
   /** Holds if expression `e` is a non-`null` value. */
@@ -992,7 +988,7 @@ module Internal {
   // The predicates in this module should be evaluated in the same stage as the CFG
   // construction stage. This is to avoid recomputation of pre-basic-blocks and
   // pre-SSA predicates
-  private module PreCFG {
+  private module PreCfg {
     private import semmle.code.csharp.controlflow.internal.PreBasicBlocks as PreBasicBlocks
     private import semmle.code.csharp.controlflow.internal.PreSsa
 
@@ -1000,10 +996,16 @@ module Internal {
      * Holds if pre-basic-block `bb` only is reached when guard `g` has abstract value `v`,
      * not taking implications into account.
      */
+    pragma[nomagic]
     private predicate preControlsDirect(Guard g, PreBasicBlocks::PreBasicBlock bb, AbstractValue v) {
       exists(PreBasicBlocks::ConditionBlock cb, ConditionalSuccessor s | cb.controls(bb, s) |
         v.branch(cb.getLastElement(), s, g)
       )
+    }
+
+    pragma[nomagic]
+    private predicate preControlsDefDirect(Guard g, PreSsa::Definition def, AbstractValue v) {
+      preControlsDirect(g, def.getBasicBlock(), v)
     }
 
     /** Holds if pre-basic-block `bb` only is reached when guard `g` has abstract value `v`. */
@@ -1098,36 +1100,47 @@ module Internal {
       )
     }
 
-    pragma[noinline]
+    pragma[nomagic]
     private predicate conditionalAssign0(
       Guard guard, AbstractValue vGuard, PreSsa::PhiNode phi, Expr e, PreSsa::Definition upd,
-      PreBasicBlocks::PreBasicBlock bbGuard
+      PreBasicBlocks::PreBasicBlock bbGuard, PreBasicBlocks::PreBasicBlock bbPhi
     ) {
       e = upd.getDefinition().getSource() and
       upd = phi.getAnInput() and
-      preControlsDirect(guard, upd.getBasicBlock(), vGuard) and
+      preControlsDefDirect(guard, upd, vGuard) and
       bbGuard.getAnElement() = guard and
-      bbGuard.strictlyDominates(phi.getBasicBlock()) and
-      not preControlsDirect(guard, phi.getBasicBlock(), vGuard)
+      bbPhi = phi.getBasicBlock()
     }
 
     pragma[noinline]
     private predicate conditionalAssign1(
       Guard guard, AbstractValue vGuard, PreSsa::PhiNode phi, Expr e, PreSsa::Definition upd,
+      PreBasicBlocks::PreBasicBlock bbGuard
+    ) {
+      exists(PreBasicBlocks::PreBasicBlock bbPhi |
+        conditionalAssign0(guard, vGuard, phi, e, upd, bbGuard, bbPhi) and
+        bbGuard.strictlyDominates(bbPhi) and
+        not preControlsDefDirect(guard, phi, vGuard)
+      )
+    }
+
+    pragma[noinline]
+    private predicate conditionalAssign2(
+      Guard guard, AbstractValue vGuard, PreSsa::PhiNode phi, Expr e, PreSsa::Definition upd,
       PreBasicBlocks::PreBasicBlock bbGuard, PreSsa::Definition other
     ) {
-      conditionalAssign0(guard, vGuard, phi, e, upd, bbGuard) and
+      conditionalAssign1(guard, vGuard, phi, e, upd, bbGuard) and
       other != upd and
       other = phi.getAnInput()
     }
 
     pragma[noinline]
-    private predicate conditionalAssign2(
+    private predicate conditionalAssign3(
       Guard guard, AbstractValue vGuard, PreSsa::Definition def, Expr e, PreSsa::Definition upd,
       PreBasicBlocks::PreBasicBlock bbGuard, PreSsa::Definition other
     ) {
-      conditionalAssign1(guard, vGuard, def, e, upd, bbGuard, other) and
-      preControlsDirect(guard, other.getBasicBlock(), vGuard.getDualValue())
+      conditionalAssign2(guard, vGuard, def, e, upd, bbGuard, other) and
+      preControlsDefDirect(guard, other, vGuard.getDualValue())
     }
 
     /** Gets the successor block that is reached when guard `g` has abstract value `v`. */
@@ -1140,11 +1153,11 @@ module Internal {
     }
 
     pragma[noinline]
-    private predicate conditionalAssign3(
+    private predicate conditionalAssign4(
       Guard guard, AbstractValue vGuard, PreSsa::Definition def, Expr e, PreSsa::Definition upd,
       PreBasicBlocks::PreBasicBlock bbGuard, PreSsa::Definition other
     ) {
-      conditionalAssign1(guard, vGuard, def, e, upd, bbGuard, other) and
+      conditionalAssign2(guard, vGuard, def, e, upd, bbGuard, other) and
       other.getBasicBlock().dominates(bbGuard) and
       not other.isLiveAtEndOfBlock(getConditionalSuccessor(guard, vGuard))
     }
@@ -1171,10 +1184,10 @@ module Internal {
       )
       or
       exists(PreSsa::Definition upd, PreBasicBlocks::PreBasicBlock bbGuard |
-        conditionalAssign0(guard, vGuard, def, e, upd, bbGuard)
+        conditionalAssign1(guard, vGuard, def, e, upd, bbGuard)
       |
         forall(PreSsa::Definition other |
-          conditionalAssign1(guard, vGuard, def, e, upd, bbGuard, other)
+          conditionalAssign2(guard, vGuard, def, e, upd, bbGuard, other)
         |
           // For example:
           //   if (guard)
@@ -1182,14 +1195,14 @@ module Internal {
           //   else
           //     other = b;
           //   def = phi(upd, other)
-          conditionalAssign2(guard, vGuard, def, e, upd, bbGuard, other)
+          conditionalAssign3(guard, vGuard, def, e, upd, bbGuard, other)
           or
           // For example:
           //   other = a;
           //   if (guard)
           //       upd = b;
           //   def = phi(other, upd)
-          conditionalAssign3(guard, vGuard, def, e, upd, bbGuard, other)
+          conditionalAssign4(guard, vGuard, def, e, upd, bbGuard, other)
         )
       )
     }
@@ -1406,7 +1419,7 @@ module Internal {
     }
 
     cached
-    private module CachedWithCFG {
+    private module CachedWithCfg {
       private import semmle.code.csharp.Caching
 
       cached
@@ -1423,7 +1436,7 @@ module Internal {
           or
           val.branch(_, _, e)
           or
-          e instanceof CollectionExpr and
+          e instanceof EnumerableCollectionExpr and
           val = TEmptyCollectionValue(_)
         ) and
         not e = any(ExprStmt es).getExpr() and
@@ -1462,7 +1475,7 @@ module Internal {
         )
       }
 
-      private predicate firstReadSameVarUniquePredecesssor(
+      private predicate firstReadSameVarUniquePredecessor(
         PreSsa::Definition def, AssignableRead read
       ) {
         read = def.getAFirstRead() and
@@ -1562,7 +1575,9 @@ module Internal {
           (g1 != g2 or v1 != v2)
         )
         or
-        exists(boolean isEmpty | g1 = g2.(CollectionExpr).getAnEmptinessCheck(v1, isEmpty) |
+        exists(boolean isEmpty |
+          g1 = g2.(EnumerableCollectionExpr).getAnEmptinessCheck(v1, isEmpty)
+        |
           v2 =
             any(EmptyCollectionValue ecv | if ecv.isEmpty() then isEmpty = true else isEmpty = false) and
           g1 != g2
@@ -1595,7 +1610,7 @@ module Internal {
           g1 = def.getARead() and
           isGuard(g1, v1) and
           v2 = v1 and
-          if v1.isReferentialProperty() then firstReadSameVarUniquePredecesssor(def, g1) else any()
+          if v1.isReferentialProperty() then firstReadSameVarUniquePredecessor(def, g1) else any()
         )
         or
         exists(PreSsa::Definition def, AbstractValue v |
@@ -1676,7 +1691,7 @@ module Internal {
           mid = e.(Cast).getExpr()
         )
         or
-        exists(PreSsa::Definition def | emptyDef(def) | firstReadSameVarUniquePredecesssor(def, e))
+        exists(PreSsa::Definition def | emptyDef(def) | firstReadSameVarUniquePredecessor(def, e))
         or
         exists(MethodCall mc |
           mc.getTarget().getAnUltimateImplementee().getUnboundDeclaration() =
@@ -1700,7 +1715,7 @@ module Internal {
         )
         or
         exists(PreSsa::Definition def | nonEmptyDef(def) |
-          firstReadSameVarUniquePredecesssor(def, e)
+          firstReadSameVarUniquePredecessor(def, e)
         )
         or
         exists(MethodCall mc |
@@ -1711,10 +1726,10 @@ module Internal {
       }
     }
 
-    import CachedWithCFG
+    import CachedWithCfg
   }
 
-  import PreCFG
+  import PreCfg
 
   private predicate interestingDescendantCandidate(Expr e) {
     guardControls(e, _, _)
@@ -1790,32 +1805,30 @@ module Internal {
   }
 
   /**
-   * A helper class for calculating structurally equal access/call expressions.
+   * Holds if access/call expression `e` (targeting declaration `target`)
+   * is a sub expression of a guard that controls whether basic block
+   * `bb` is reached.
    */
-  private class ConditionOnExprComparisonConfig extends InternalStructuralComparisonConfiguration {
-    ConditionOnExprComparisonConfig() { this = "ConditionOnExprComparisonConfig" }
+  pragma[noinline]
+  private predicate candidateAux(AccessOrCallExpr e, Declaration target, BasicBlock bb) {
+    target = e.getTarget() and
+    guardControlsSub(_, bb, e)
+  }
 
-    override predicate candidate(ControlFlowElement x, ControlFlowElement y) {
-      exists(BasicBlock bb, Declaration d |
-        this.candidateAux(x, d, bb) and
-        y =
-          any(AccessOrCallExpr e |
-            e.getAControlFlowNode().getBasicBlock() = bb and
-            e.getTarget() = d
-          )
-      )
-    }
+  private predicate candidate(AccessOrCallExpr x, AccessOrCallExpr y) {
+    exists(BasicBlock bb, Declaration d |
+      candidateAux(x, d, bb) and
+      y =
+        any(AccessOrCallExpr e |
+          e.getAControlFlowNode().getBasicBlock() = bb and
+          e.getTarget() = d
+        )
+    )
+  }
 
-    /**
-     * Holds if access/call expression `e` (targeting declaration `target`)
-     * is a sub expression of a guard that controls whether basic block
-     * `bb` is reached.
-     */
-    pragma[noinline]
-    private predicate candidateAux(AccessOrCallExpr e, Declaration target, BasicBlock bb) {
-      target = e.getTarget() and
-      guardControlsSub(_, bb, e)
-    }
+  private predicate same(AccessOrCallExpr x, AccessOrCallExpr y) {
+    candidate(x, y) and
+    SC::sameGvn(x, y)
   }
 
   cached
@@ -1841,7 +1854,7 @@ module Internal {
     pragma[nomagic]
     private predicate guardControlsSubSame(Guard g, BasicBlock bb, ControlGuardDescendant sub) {
       guardControlsSub(g, bb, sub) and
-      any(ConditionOnExprComparisonConfig c).same(sub, _)
+      same(sub, _)
     }
 
     pragma[nomagic]
@@ -1854,7 +1867,7 @@ module Internal {
       guardedBB = guardedCfn.getBasicBlock() and
       guardControls(g, guardedBB, v) and
       guardControlsSubSame(g, guardedBB, sub) and
-      any(ConditionOnExprComparisonConfig c).same(sub, guarded)
+      same(sub, guarded)
     }
 
     pragma[nomagic]
@@ -1940,7 +1953,7 @@ module Internal {
       |
         def =
           guarded
-              .getElement()
+              .getAstNode()
               .(AccessOrCallExpr)
               .getAnSsaQualifier(guarded.getBasicBlock().getANode()) and
         if v.isReferentialProperty()

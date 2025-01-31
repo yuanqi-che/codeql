@@ -21,7 +21,7 @@ abstract class Dependency extends Locatable {
   abstract predicate info(string id, string v);
 
   /**
-   * A use of this dependency, which is of the given `kind`.
+   * Gets a use of this dependency, which is of the given `kind`.
    *
    * Currently, the only supported kinds are `"import"` and `"use"`.
    */
@@ -35,9 +35,9 @@ abstract class Dependency extends Locatable {
  * the source tree, or a package that is referenced as a dependency
  * in a `package.json` file.
  */
-abstract class NPMDependency extends Dependency {
+abstract class NpmDependency extends Dependency {
   /** Gets the name of the NPM package this module belongs to. */
-  abstract string getNPMPackageName();
+  abstract string getNpmPackageName();
 
   /** Gets the version of the NPM package this module belongs to. */
   abstract string getVersion();
@@ -46,7 +46,7 @@ abstract class NPMDependency extends Dependency {
   abstract Import getAnImport();
 
   override predicate info(string id, string v) {
-    id = this.getNPMPackageName() and
+    id = this.getNpmPackageName() and
     v = this.getVersion()
   }
 
@@ -83,23 +83,23 @@ private Expr propAccessOn(Expr e) { result.(PropAccess).getBase() = e }
  * included in the database (as opposed to an `ExternalNPMDependency`
  * which is only referenced in a `package.json` file).
  */
-class BundledNPMDependency extends NPMDependency {
-  BundledNPMDependency() {
-    exists(NPMPackage pkg | this = pkg.getAModule() |
+class BundledNpmDependency extends NpmDependency {
+  BundledNpmDependency() {
+    exists(NpmPackage pkg | this = pkg.getAModule() |
       // exclude packages marked "private": they have no globally unique ID
-      not pkg.getPackageJSON().isPrivate()
+      not pkg.getPackageJson().isPrivate()
     )
   }
 
   /** Gets the package to which this module belongs. */
-  private NPMPackage getPackage() { this = result.getAModule() }
+  private NpmPackage getPackage() { this = result.getAModule() }
 
   /** Gets the `package.json` of the package to which this module belongs. */
-  private PackageJSON getPackageJSON() { result = this.getPackage().getPackageJSON() }
+  private PackageJson getPackageJson() { result = this.getPackage().getPackageJson() }
 
-  override string getNPMPackageName() { result = this.getPackageJSON().getPackageName() }
+  override string getNpmPackageName() { result = this.getPackageJson().getPackageName() }
 
-  override string getVersion() { result = this.getPackageJSON().getVersion() }
+  override string getVersion() { result = this.getPackageJson().getVersion() }
 
   override Import getAnImport() {
     this = result.getImportedModule() and
@@ -111,24 +111,24 @@ class BundledNPMDependency extends NPMDependency {
 /**
  * An NPM package referenced in a `package.json` file.
  */
-class ExternalNPMDependency extends NPMDependency {
-  ExternalNPMDependency() {
-    exists(PackageJSON pkgjson |
-      this.(JSONString) = pkgjson.getADependenciesObject(_).getPropValue(_)
+class ExternalNpmDependency extends NpmDependency {
+  ExternalNpmDependency() {
+    exists(PackageJson pkgjson |
+      this.(JsonString) = pkgjson.getADependenciesObject(_).getPropValue(_)
     )
   }
 
   /** Gets the NPM package declaring this dependency. */
-  private NPMPackage getDeclaringPackage() {
-    this = result.getPackageJSON().getADependenciesObject(_).getPropValue(_)
+  private NpmPackage getDeclaringPackage() {
+    this = result.getPackageJson().getADependenciesObject(_).getPropValue(_)
   }
 
-  override string getNPMPackageName() {
+  override string getNpmPackageName() {
     exists(PackageDependencies pkgdeps | this = pkgdeps.getPropValue(result))
   }
 
   private string getVersionNumber() {
-    exists(string versionRange | versionRange = this.(JSONString).getValue() |
+    exists(string versionRange | versionRange = this.(JsonString).getValue() |
       // extract a concrete version from the version range; currently,
       // we handle exact versions as well as `<=`, `>=`, `~` and `^` ranges
       result = versionRange.regexpCapture("(?:[><]=|[=~^])?v?(\\d+(\\.\\d+){1,2})", 1)
@@ -155,9 +155,9 @@ class ExternalNPMDependency extends NPMDependency {
  * Holds if import `i` may refer to the declared dependency `dep` of package `pkg`,
  * where the result value is the nesting depth of the file containing `i` within `pkg`.
  */
-private int importsDependency(Import i, NPMPackage pkg, NPMDependency dep) {
+private int importsDependency(Import i, NpmPackage pkg, NpmDependency dep) {
   exists(string name |
-    dep = pkg.getPackageJSON().getADependenciesObject(_).getPropValue(name) and
+    dep = pkg.getPackageJson().getADependenciesObject(_).getPropValue(name) and
     not exists(i.getImportedModule()) and
     i.getImportedPath().getComponent(0) = name and
     i.getEnclosingModule() = pkg.getAModule() and
@@ -208,21 +208,18 @@ abstract class ScriptDependency extends Dependency {
 /**
  * An embedded JavaScript library included inside a `<script>` tag.
  */
-class InlineScriptDependency extends ScriptDependency, @toplevel {
-  FrameworkLibraryInstance fli;
-
-  InlineScriptDependency() { this = fli }
-
+class InlineScriptDependency extends ScriptDependency, @toplevel instanceof FrameworkLibraryInstance
+{
   override predicate info(string id, string v) {
     exists(FrameworkLibrary fl |
-      fli.info(fl, v) and
+      FrameworkLibraryInstance.super.info(fl, v) and
       id = fl.getId()
     )
   }
 
   override Expr getAnApiUse() {
     exists(FrameworkLibrary fl |
-      fli.info(fl, _) and
+      FrameworkLibraryInstance.super.info(fl, _) and
       propAccessOnGlobal(result, fl.getAnEntryPoint()) and
       result.getFile() = this.getFile() and
       result.getTopLevel() != this
@@ -234,21 +231,18 @@ class InlineScriptDependency extends ScriptDependency, @toplevel {
  * An external JavaScript library referenced via the `src` attribute
  * of a `<script>` tag.
  */
-class ExternalScriptDependency extends ScriptDependency, @xmlattribute {
-  FrameworkLibraryReference flr;
-
-  ExternalScriptDependency() { this = flr }
-
+class ExternalScriptDependency extends ScriptDependency, @xmlattribute instanceof FrameworkLibraryReference
+{
   override predicate info(string id, string v) {
     exists(FrameworkLibrary fl |
-      flr.info(fl, v) and
+      FrameworkLibraryReference.super.info(fl, v) and
       id = fl.getId()
     )
   }
 
   override Expr getAnApiUse() {
     exists(FrameworkLibrary fl |
-      flr.info(fl, _) and
+      FrameworkLibraryReference.super.info(fl, _) and
       propAccessOnGlobal(result, fl.getAnEntryPoint()) and
       result.getFile() = this.getFile()
     )
@@ -258,15 +252,13 @@ class ExternalScriptDependency extends ScriptDependency, @xmlattribute {
 /**
  * A dependency on GWT indicated by a GWT header script.
  */
-private class GWTDependency extends ScriptDependency {
-  GWTDependency() { this instanceof GWTHeader }
-
+private class GwtDependency extends ScriptDependency instanceof GwtHeader {
   override predicate info(string id, string v) {
     id = "gwt" and
-    exists(GWTHeader h | h = this |
-      v = h.getGWTVersion()
+    exists(GwtHeader h | h = this |
+      v = h.getGwtVersion()
       or
-      not exists(h.getGWTVersion()) and v = "unknown"
+      not exists(h.getGwtVersion()) and v = "unknown"
     )
   }
 

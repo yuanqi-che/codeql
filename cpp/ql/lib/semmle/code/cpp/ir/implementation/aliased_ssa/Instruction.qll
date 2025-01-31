@@ -41,7 +41,7 @@ class Instruction extends Construction::TStageInstruction {
   }
 
   /** Gets a textual representation of this element. */
-  final string toString() { result = this.getOpcode().toString() + ": " + this.getAST().toString() }
+  final string toString() { result = this.getOpcode().toString() + ": " + this.getAst().toString() }
 
   /**
    * Gets a string showing the result, opcode, and operands of the instruction, equivalent to what
@@ -116,14 +116,14 @@ class Instruction extends Construction::TStageInstruction {
 
   private int getLineRank() {
     this.shouldGenerateDumpStrings() and
-    this =
-      rank[result](Instruction instr |
-        instr =
-          getAnInstructionAtLine(this.getEnclosingIRFunction(), this.getLocation().getFile(),
-            this.getLocation().getStartLine())
-      |
-        instr order by instr.getBlock().getDisplayIndex(), instr.getDisplayIndexInBlock()
-      )
+    exists(IRFunction enclosing, Language::File file, int line |
+      this =
+        rank[result](Instruction instr |
+          instr = getAnInstructionAtLine(enclosing, file, line)
+        |
+          instr order by instr.getBlock().getDisplayIndex(), instr.getDisplayIndexInBlock()
+        )
+    )
   }
 
   /**
@@ -136,7 +136,7 @@ class Instruction extends Construction::TStageInstruction {
   string getResultId() {
     this.shouldGenerateDumpStrings() and
     result =
-      this.getResultPrefix() + this.getAST().getLocation().getStartLine() + "_" + this.getLineRank()
+      this.getResultPrefix() + this.getAst().getLocation().getStartLine() + "_" + this.getLineRank()
   }
 
   /**
@@ -194,7 +194,7 @@ class Instruction extends Construction::TStageInstruction {
   /**
    * Gets the function that contains this instruction.
    */
-  final Language::Function getEnclosingFunction() {
+  final Language::Declaration getEnclosingFunction() {
     result = this.getEnclosingIRFunction().getFunction()
   }
 
@@ -208,12 +208,12 @@ class Instruction extends Construction::TStageInstruction {
   /**
    * Gets the AST that caused this instruction to be generated.
    */
-  final Language::AST getAST() { result = Construction::getInstructionAST(this) }
+  final Language::AST getAst() { result = Construction::getInstructionAst(this) }
 
   /**
    * Gets the location of the source code for this instruction.
    */
-  final Language::Location getLocation() { result = this.getAST().getLocation() }
+  final Language::Location getLocation() { result = this.getAst().getLocation() }
 
   /**
    * Gets the  `Expr` whose result is computed by this instruction, if any. The `Expr` may be a
@@ -247,8 +247,7 @@ class Instruction extends Construction::TStageInstruction {
    * Gets the type of the result produced by this instruction. If the instruction does not produce
    * a result, its result type will be `IRVoidType`.
    */
-  cached
-  final IRType getResultIRType() { result = this.getResultLanguageType().getIRType() }
+  final IRType getResultIRType() { result = Construction::getInstructionResultIRType(this) }
 
   /**
    * Gets the type of the result produced by this instruction. If the
@@ -459,7 +458,7 @@ class VariableInstruction extends Instruction {
   /**
    * Gets the AST variable that this instruction's IR variable refers to, if one exists.
    */
-  final Language::Variable getASTVariable() { result = var.(IRUserVariable).getVariable() }
+  final Language::Variable getAstVariable() { result = var.(IRUserVariable).getVariable() }
 }
 
 /**
@@ -574,6 +573,22 @@ class VariableAddressInstruction extends VariableInstruction {
  */
 class FunctionAddressInstruction extends FunctionInstruction {
   FunctionAddressInstruction() { this.getOpcode() instanceof Opcode::FunctionAddress }
+}
+
+/**
+ * An instruction that returns the address of a "virtual" delete function.
+ *
+ * This function, which does not actually exist in the source code, is used to
+ * delete objects of a class with a virtual destructor. In that case the deacllocation
+ * function is selected at runtime based on the dynamic type of the object. So this
+ * function dynamically dispatches to the correct deallocation function.
+ * It also should pass in the required extra arguments to the deallocation function
+ * which may differ dynamically depending on the type of the object.
+ */
+class VirtualDeleteFunctionAddressInstruction extends Instruction {
+  VirtualDeleteFunctionAddressInstruction() {
+    this.getOpcode() instanceof Opcode::VirtualDeleteFunctionAddress
+  }
 }
 
 /**
@@ -736,7 +751,7 @@ class NoOpInstruction extends Instruction {
  * The `ReturnInstruction` for a function will have a control-flow successor edge to a block
  * containing the `ExitFunction` instruction for that function.
  *
- * There are two differet return instructions: `ReturnValueInstruction`, for returning a value from
+ * There are two different return instructions: `ReturnValueInstruction`, for returning a value from
  * a non-`void`-returning function, and `ReturnVoidInstruction`, for returning from a
  * `void`-returning function.
  */
@@ -979,9 +994,8 @@ class ConstantInstruction extends ConstantValueInstruction {
  */
 class IntegerConstantInstruction extends ConstantInstruction {
   IntegerConstantInstruction() {
-    exists(IRType resultType |
-      resultType = this.getResultIRType() and
-      (resultType instanceof IRIntegerType or resultType instanceof IRBooleanType)
+    exists(IRType resultType | resultType = this.getResultIRType() |
+      resultType instanceof IRIntegerType or resultType instanceof IRBooleanType
     )
   }
 }
@@ -991,6 +1005,17 @@ class IntegerConstantInstruction extends ConstantInstruction {
  */
 class FloatConstantInstruction extends ConstantInstruction {
   FloatConstantInstruction() { this.getResultIRType() instanceof IRFloatingPointType }
+}
+
+/**
+ * An instruction whose result is a constant value of a pointer type.
+ */
+class PointerConstantInstruction extends ConstantInstruction {
+  PointerConstantInstruction() {
+    exists(IRType resultType | resultType = this.getResultIRType() |
+      resultType instanceof IRAddressType or resultType instanceof IRFunctionAddressType
+    )
+  }
 }
 
 /**
@@ -1199,6 +1224,17 @@ class ShiftRightInstruction extends BinaryBitwiseInstruction {
 }
 
 /**
+ * An instruction that shifts its left operand to the right by the number of bits specified by its
+ * right operand.
+ *
+ * Both operands must have an integer type. The result has the same type as the left operand.
+ * The leftmost bits are zero-filled.
+ */
+class UnsignedShiftRightInstruction extends BinaryBitwiseInstruction {
+  UnsignedShiftRightInstruction() { this.getOpcode() instanceof Opcode::UnsignedShiftRight }
+}
+
+/**
  * An instruction that performs a binary arithmetic operation involving at least one pointer
  * operand.
  */
@@ -1325,7 +1361,7 @@ class CheckedConvertOrThrowInstruction extends UnaryInstruction {
  *
  * If the operand holds a null address, the result is a null address.
  *
- * This instruction is used to represent `dyanmic_cast<void*>` in C++, which returns the pointer to
+ * This instruction is used to represent `dynamic_cast<void*>` in C++, which returns the pointer to
  * the most-derived object.
  */
 class CompleteObjectAddressInstruction extends UnaryInstruction {
@@ -2099,18 +2135,52 @@ class ChiInstruction extends Instruction {
   final Instruction getPartial() { result = this.getPartialOperand().getDef() }
 
   /**
-   * Gets the bit range `[startBit, endBit)` updated by the partial operand of this `ChiInstruction`, relative to the start address of the total operand.
-   */
-  final predicate getUpdatedInterval(int startBit, int endBit) {
-    Construction::getIntervalUpdatedByChi(this, startBit, endBit)
-  }
-
-  /**
    * Holds if the `ChiPartialOperand` totally, but not exactly, overlaps with the `ChiTotalOperand`.
    * This means that the `ChiPartialOperand` will not override the entire memory associated with the
    * `ChiTotalOperand`.
    */
   final predicate isPartialUpdate() { Construction::chiOnlyPartiallyUpdatesLocation(this) }
+}
+
+/**
+ * An instruction that initializes a set of allocations that are each assigned
+ * the same "virtual variable".
+ *
+ * As an example, consider the following snippet:
+ * ```
+ * int a;
+ * int b;
+ * int* p;
+ * if(b) {
+ *   p = &a;
+ * } else {
+ *   p = &b;
+ * }
+ * *p = 5;
+ * int x = a;
+ * ```
+ *
+ * Since both the address of `a` and `b` reach `p` at `*p = 5` the IR alias
+ * analysis will create a region that contains both `a` and `b`. The region
+ * containing both `a` and `b` are initialized by an `UninitializedGroup`
+ * instruction in the entry block of the enclosing function.
+ */
+class UninitializedGroupInstruction extends Instruction {
+  UninitializedGroupInstruction() { this.getOpcode() instanceof Opcode::UninitializedGroup }
+
+  /**
+   * Gets an `IRVariable` whose memory is initialized by this instruction, if any.
+   * Note: Allocations that are not represented as `IRVariable`s (such as
+   * dynamic allocations) are not returned by this predicate even if this
+   * instruction initializes such memory.
+   */
+  final IRVariable getAnIRVariable() {
+    result = Construction::getAnUninitializedGroupVariable(this)
+  }
+
+  final override string getImmediateString() {
+    result = strictconcat(this.getAnIRVariable().toString(), ",")
+  }
 }
 
 /**

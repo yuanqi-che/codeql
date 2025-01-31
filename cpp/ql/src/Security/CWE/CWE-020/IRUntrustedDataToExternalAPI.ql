@@ -13,10 +13,10 @@ import cpp
 import semmle.code.cpp.ir.dataflow.TaintTracking
 import ir.ExternalAPIs
 import semmle.code.cpp.security.FlowSources
-import DataFlow::PathGraph
+import UntrustedDataToExternalApiFlow::PathGraph
 
-from UntrustedDataToExternalAPIConfig config, DataFlow::PathNode source, DataFlow::PathNode sink
-where config.hasFlowPath(source, sink)
+from UntrustedDataToExternalApiFlow::PathNode source, UntrustedDataToExternalApiFlow::PathNode sink
+where UntrustedDataToExternalApiFlow::flowPath(source, sink)
 select sink, source, sink,
-  "Call to " + sink.getNode().(ExternalAPIDataNode).getExternalFunction().toString() +
+  "Call to " + sink.getNode().(ExternalApiDataNode).getExternalFunction().toString() +
     " with untrusted data from $@.", source, source.getNode().(RemoteFlowSource).getSourceType()

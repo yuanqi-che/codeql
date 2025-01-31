@@ -63,7 +63,8 @@ module DOM {
   /**
    * An HTML element, viewed as an `ElementDefinition`.
    */
-  private class HtmlElementDefinition extends ElementDefinition, @xmlelement instanceof HTML::Element {
+  private class HtmlElementDefinition extends ElementDefinition, @xmlelement instanceof HTML::Element
+  {
     override string getName() { result = HTML::Element.super.getName() }
 
     override AttributeDefinition getAttribute(int i) {
@@ -76,10 +77,10 @@ module DOM {
   /**
    * A JSX element, viewed as an `ElementDefinition`.
    */
-  private class JsxElementDefinition extends ElementDefinition, @jsx_element instanceof JSXElement {
-    override string getName() { result = JSXElement.super.getName() }
+  private class JsxElementDefinition extends ElementDefinition, @jsx_element instanceof JsxElement {
+    override string getName() { result = JsxElement.super.getName() }
 
-    override AttributeDefinition getAttribute(int i) { result = JSXElement.super.getAttribute(i) }
+    override AttributeDefinition getAttribute(int i) { result = JsxElement.super.getAttribute(i) }
 
     override ElementDefinition getParent() { result = super.getJsxParent() }
   }
@@ -127,7 +128,8 @@ module DOM {
   /**
    * An HTML attribute, viewed as an `AttributeDefinition`.
    */
-  private class HtmlAttributeDefinition extends AttributeDefinition, @xmlattribute instanceof HTML::Attribute {
+  private class HtmlAttributeDefinition extends AttributeDefinition, @xmlattribute instanceof HTML::Attribute
+  {
     override string getName() { result = HTML::Attribute.super.getName() }
 
     override string getStringValue() { result = super.getValue() }
@@ -138,16 +140,15 @@ module DOM {
   /**
    * A JSX attribute, viewed as an `AttributeDefinition`.
    */
-  private class JsxAttributeDefinition extends AttributeDefinition, @jsx_attribute {
-    JSXAttribute attr;
+  private class JsxAttributeDefinition extends AttributeDefinition, @jsx_attribute instanceof JsxAttribute
+  {
+    override string getName() { result = JsxAttribute.super.getName() }
 
-    JsxAttributeDefinition() { this = attr }
+    override DataFlow::Node getValueNode() {
+      result = DataFlow::valueNode(JsxAttribute.super.getValue())
+    }
 
-    override string getName() { result = attr.getName() }
-
-    override DataFlow::Node getValueNode() { result = DataFlow::valueNode(attr.getValue()) }
-
-    override ElementDefinition getElement() { result = attr.getElement() }
+    override ElementDefinition getElement() { result = JsxAttribute.super.getElement() }
   }
 
   /**
@@ -176,18 +177,13 @@ module DOM {
       eltName = ["script", "iframe", "embed", "video", "audio", "source", "track"] and
       attrName = "src"
       or
-      (
-        eltName = "link" or
-        eltName = "a" or
-        eltName = "base" or
-        eltName = "area"
-      ) and
+      eltName = ["link", "a", "base", "area"] and
       attrName = "href"
       or
       eltName = "form" and
       attrName = "action"
       or
-      (eltName = "input" or eltName = "button") and
+      eltName = ["input", "button"] and
       attrName = "formaction"
     )
   }
@@ -305,7 +301,7 @@ module DOM {
     }
 
     /**
-     * A data flow node that might refer to some form.
+     * Gets a data flow node that might refer to some form.
      * Either by a read like `document.forms[0]`, or a property read from `document` with some constant property-name.
      * E.g. if `<form name="foobar">..</form>` exists, then `document.foobar` refers to that form.
      */
@@ -328,7 +324,7 @@ module DOM {
 
     private class DefaultRange extends Range {
       DefaultRange() {
-        this.asExpr().(VarAccess).getVariable() instanceof DOMGlobalVariable
+        this.asExpr().(VarAccess).getVariable() instanceof DomGlobalVariable
         or
         exists(DataFlow::PropRead read |
           this = read and
@@ -392,23 +388,33 @@ module DOM {
     }
   }
 
-  /**
-   * Gets a reference to a DOM event.
-   */
-  private DataFlow::SourceNode domEventSource() {
-    // e.g. <form onSubmit={e => e.target}/>
-    exists(JSXAttribute attr | attr.getName().matches("on%") |
-      result = attr.getValue().flow().getABoundFunctionValue(0).getParameter(0)
-    )
-    or
-    // node.addEventListener("submit", e => e.target)
-    result = domValueRef().getAMethodCall("addEventListener").getABoundCallbackParameter(1, 0)
-    or
-    // node.onSubmit = (e => e.target);
-    exists(DataFlow::PropWrite write | write = domValueRef().getAPropertyWrite() |
-      write.getPropertyName().matches("on%") and
-      result = write.getRhs().getAFunctionValue().getParameter(0)
-    )
+  /** A data flow node that is a source of DOM events. */
+  class DomEventSource extends DataFlow::Node instanceof DomEventSource::Range { }
+
+  /** Companion module to the `DomEventSource` class. */
+  module DomEventSource {
+    /**
+     * A data flow node that should be considered a source of DOM events.
+     */
+    abstract class Range extends DataFlow::Node { }
+
+    private class DefaultRange extends Range {
+      DefaultRange() {
+        // e.g. <form onSubmit={e => e.target}/>
+        exists(JsxAttribute attr | attr.getName().matches("on%") |
+          this = attr.getValue().flow().getABoundFunctionValue(0).getParameter(0)
+        )
+        or
+        // node.addEventListener("submit", e => e.target)
+        this = domValueRef().getAMethodCall("addEventListener").getABoundCallbackParameter(1, 0)
+        or
+        // node.onSubmit = (e => e.target);
+        exists(DataFlow::PropWrite write | write = domValueRef().getAPropertyWrite() |
+          write.getPropertyName().matches("on%") and
+          this = write.getRhs().getAFunctionValue().getParameter(0)
+        )
+      }
+    }
   }
 
   /** Gets a data flow node that refers directly to a value from the DOM. */
@@ -423,7 +429,10 @@ module DOM {
     result = domValueRef().getAMethodCall(["item", "namedItem"])
     or
     t.startInProp("target") and
-    result = domEventSource()
+    result instanceof DomEventSource
+    or
+    t.startInProp(DataFlow::PseudoProperties::arrayElement()) and
+    result = domElementCollection()
     or
     exists(DataFlow::TypeTracker t2 | result = domValueRef(t2).track(t2, t))
   }
@@ -435,6 +444,12 @@ module DOM {
     result.hasUnderlyingType("Element")
     or
     result.hasUnderlyingType(any(string s | s.matches("HTML%Element")))
+    or
+    exists(DataFlow::ClassNode cls |
+      cls.getASuperClassNode().getALocalSource() =
+        DataFlow::globalVarRef(any(string s | s.matches("HTML%Element"))) and
+      result = cls.getAnInstanceReference()
+    )
   }
 
   module LocationSource {
@@ -468,7 +483,8 @@ module DOM {
     // One step inlined in the beginning.
     exists(DataFlow::TypeTracker t2 |
       result =
-        any(DataFlow::Node n | n.hasUnderlyingType("Location")).getALocalSource().track(t2, t)
+        any(DataFlow::Node n | n.hasUnderlyingType("Location")).getALocalSource().track(t2, t) and
+      t2.start()
     )
     or
     exists(DataFlow::TypeTracker t2 | result = nonFirstLocationType(t2).track(t2, t))

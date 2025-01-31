@@ -1,5 +1,5 @@
 /**
- * Provides classes for modelling common markdown parsers and generators.
+ * Provides classes for modeling common markdown parsers and generators.
  */
 
 import semmle.javascript.Unit
@@ -21,7 +21,7 @@ module Markdown {
     /**
      * Holds if the taint-step preserves HTML.
      */
-    predicate preservesHTML() { any() }
+    predicate preservesHtml() { any() }
   }
 
   private class MarkdownStepAsTaintStep extends TaintTracking::SharedTaintStep {
@@ -52,6 +52,7 @@ module Markdown {
   private class MarkdownTableStep extends MarkdownStep {
     override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
       exists(DataFlow::CallNode call | call = DataFlow::moduleImport("markdown-table").getACall() |
+        // TODO: needs a flow summary to ensure ArrayElement content is unfolded
         succ = call and
         pred = call.getArgument(0)
       )
@@ -75,12 +76,38 @@ module Markdown {
     }
   }
 
+  /** A taint step for the `mermaid` library. */
+  private class MermaidStep extends MarkdownStep {
+    override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
+      exists(API::CallNode call |
+        call =
+          [API::moduleImport("mermaid"), API::moduleImport("mermaid").getMember("mermaidAPI")]
+              .getMember("render")
+              .getACall()
+      |
+        succ = [call, call.getParameter(2).getParameter(0).asSource()] and
+        pred = call.getArgument(1)
+      )
+      or
+      exists(DataFlow::CallNode call |
+        call =
+          [
+            DataFlow::globalVarRef("mermaid"),
+            DataFlow::globalVarRef("mermaid").getAPropertyRead("mermaidAPI")
+          ].getAMemberCall("render")
+      |
+        succ = [call.(DataFlow::Node), call.getABoundCallbackParameter(2, 0)] and
+        pred = call.getArgument(1)
+      )
+    }
+  }
+
   /**
-   * Classes and predicates for modelling taint steps in `unified` and `remark`.
+   * Classes and predicates for modeling taint steps in `unified` and `remark`.
    */
   private module Unified {
     /**
-     * The creation of a parser from `unified`.
+     * Gets a parser from `unified`.
      * The `remark` module is a shorthand that initializes `unified` with a markdown parser.
      */
     DataFlow::CallNode unified() {
@@ -148,11 +175,11 @@ module Markdown {
   }
 
   /**
-   * Classes and predicates for modelling taint steps the `markdown-it` library.
+   * Classes and predicates for modeling taint steps the `markdown-it` library.
    */
   private module MarkdownIt {
     /**
-     * The creation of a parser from `markdown-it`.
+     * Gets a creation of a parser from `markdown-it`.
      */
     private API::Node markdownIt() {
       exists(API::InvokeNode call |
@@ -160,14 +187,14 @@ module Markdown {
         or
         call = API::moduleImport("markdown-it").getMember("Markdown").getAnInvocation()
       |
-        call.getParameter(0).getMember("html").getARhs().mayHaveBooleanValue(true) and
+        call.getParameter(0).getMember("html").asSink().mayHaveBooleanValue(true) and
         result = call.getReturn()
       )
       or
       exists(API::CallNode call |
         call = markdownIt().getMember(["use", "set", "configure", "enable", "disable"]).getACall() and
         result = call.getReturn() and
-        not call.getParameter(0).getAValueReachingRhs() =
+        not call.getParameter(0).getAValueReachingSink() =
           DataFlow::moduleImport("markdown-it-sanitizer")
       )
     }

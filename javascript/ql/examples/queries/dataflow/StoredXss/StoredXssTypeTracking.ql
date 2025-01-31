@@ -10,10 +10,10 @@
 
 import javascript
 import semmle.javascript.security.dataflow.StoredXssQuery
-import DataFlow::PathGraph
+import StoredXssFlow::PathGraph
 
 /**
- * An instance of `mysql.createConnection()`, tracked globally.
+ * Gets an instance of `mysql.createConnection()`, tracked globally.
  */
 DataFlow::SourceNode mysqlConnection(DataFlow::TypeTracker t) {
   t.start() and
@@ -23,12 +23,12 @@ DataFlow::SourceNode mysqlConnection(DataFlow::TypeTracker t) {
 }
 
 /**
- * An instance of `mysql.createConnection()`, tracked globally.
+ * Gets an instance of `mysql.createConnection()`, tracked globally.
  */
 DataFlow::SourceNode mysqlConnection() { result = mysqlConnection(DataFlow::TypeTracker::end()) }
 
 /**
- * Data returned from a MySQL query.
+ * The data returned from a MySQL query.
  *
  * For example:
  * ```
@@ -45,6 +45,6 @@ class MysqlSource extends Source {
   MysqlSource() { this = mysqlConnection().getAMethodCall("query").getCallback(1).getParameter(1) }
 }
 
-from Configuration cfg, DataFlow::PathNode source, DataFlow::PathNode sink
-where cfg.hasFlowPath(source, sink)
+from StoredXssFlow::PathNode source, StoredXssFlow::PathNode sink
+where StoredXssFlow::flowPath(source, sink)
 select sink.getNode(), source, sink, "Stored XSS from $@.", source.getNode(), "database value."

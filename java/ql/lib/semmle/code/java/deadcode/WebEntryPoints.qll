@@ -7,17 +7,12 @@ import semmle.code.java.frameworks.Servlets
  * Any class which extends the `Servlet` interface is intended to be constructed reflectively by a
  * servlet container.
  */
-class ServletConstructedClass extends ReflectivelyConstructedClass {
+class ServletConstructedClass extends ReflectivelyConstructedClass instanceof ServletClass {
   ServletConstructedClass() {
-    this instanceof ServletClass and
     // If we have seen any `web.xml` files, this servlet will be considered to be live only if it is
     // referred to as a servlet-class in at least one. If no `web.xml` files are found, we assume
     // that XML extraction was not enabled, and therefore consider all `Servlet` classes as live.
-    (
-      isWebXMLIncluded()
-      implies
-      exists(WebServletClass servletClass | this = servletClass.getClass())
-    )
+    isWebXmlIncluded() implies exists(WebServletClass servletClass | this = servletClass.getClass())
   }
 }
 
@@ -29,12 +24,12 @@ class ServletConstructedClass extends ReflectivelyConstructedClass {
  */
 class ServletListenerClass extends ReflectivelyConstructedClass {
   ServletListenerClass() {
-    this.getAnAncestor() instanceof ServletWebXMLListenerType and
+    this.getAnAncestor() instanceof ServletWebXmlListenerType and
     // If we have seen any `web.xml` files, this listener will be considered to be live only if it is
     // referred to as a listener-class in at least one. If no `web.xml` files are found, we assume
     // that XML extraction was not enabled, and therefore consider all listener classes as live.
     (
-      isWebXMLIncluded()
+      isWebXmlIncluded()
       implies
       exists(WebListenerClass listenerClass | this = listenerClass.getClass())
     )
@@ -47,26 +42,26 @@ class ServletListenerClass extends ReflectivelyConstructedClass {
  */
 class ServletFilterClass extends ReflectivelyConstructedClass {
   ServletFilterClass() {
-    this.getASupertype*().hasQualifiedName("javax.servlet", "Filter") and
+    this.getAnAncestor().hasQualifiedName("javax.servlet", "Filter") and
     // If we have seen any `web.xml` files, this filter will be considered to be live only if it is
     // referred to as a filter-class in at least one. If no `web.xml` files are found, we assume
     // that XML extraction was not enabled, and therefore consider all filter classes as live.
-    (isWebXMLIncluded() implies exists(WebFilterClass filterClass | this = filterClass.getClass()))
+    (isWebXmlIncluded() implies exists(WebFilterClass filterClass | this = filterClass.getClass()))
   }
 }
 
 /**
  * An entry point into a GWT application.
  */
-class GWTEntryPointConstructedClass extends ReflectivelyConstructedClass {
-  GWTEntryPointConstructedClass() { this.(GwtEntryPointClass).isLive() }
+class GwtEntryPointConstructedClass extends ReflectivelyConstructedClass {
+  GwtEntryPointConstructedClass() { this.(GwtEntryPointClass).isLive() }
 }
 
 /**
  * Servlets referred to from a GWT module config file.
  */
-class GWTServletClass extends ReflectivelyConstructedClass {
-  GWTServletClass() {
+class GwtServletClass extends ReflectivelyConstructedClass {
+  GwtServletClass() {
     this instanceof ServletClass and
     // There must be evidence that GWT is being used, otherwise missing `*.gwt.xml` files could cause
     // all `Servlet`s to be live.
@@ -106,6 +101,4 @@ class GwtUiBinderEntryPoint extends CallableEntryPoint {
 /**
  * Fields that may be reflectively read or written to by the UiBinder framework.
  */
-class GwtUiBinderReflectivelyReadField extends ReflectivelyReadField {
-  GwtUiBinderReflectivelyReadField() { this instanceof GwtUiField }
-}
+class GwtUiBinderReflectivelyReadField extends ReflectivelyReadField instanceof GwtUiField { }

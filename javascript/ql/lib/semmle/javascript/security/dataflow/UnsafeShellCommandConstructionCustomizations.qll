@@ -5,7 +5,6 @@
  */
 
 import javascript
-private import semmle.javascript.security.dataflow.RemoteFlowSources
 private import semmle.javascript.PackageExports as Exports
 private import semmle.javascript.dataflow.InferredTypes
 
@@ -48,9 +47,30 @@ module UnsafeShellCommandConstruction {
   abstract class Sanitizer extends DataFlow::Node { }
 
   /**
+   * A barrier guard for shell command constructed from library input vulnerabilities.
+   */
+  abstract class BarrierGuard extends DataFlow::Node {
+    /**
+     * Holds if this node acts as a barrier for data flow, blocking further flow from `e` if `this` evaluates to `outcome`.
+     */
+    predicate blocksExpr(boolean outcome, Expr e) { none() }
+
+    /** DEPRECATED. Use `blocksExpr` instead. */
+    deprecated predicate sanitizes(boolean outcome, Expr e) { this.blocksExpr(outcome, e) }
+  }
+
+  /** A subclass of `BarrierGuard` that is used for backward compatibility with the old data flow library. */
+  deprecated final private class BarrierGuardLegacy extends TaintTracking::SanitizerGuardNode instanceof BarrierGuard
+  {
+    override predicate sanitizes(boolean outcome, Expr e) {
+      BarrierGuard.super.sanitizes(outcome, e)
+    }
+  }
+
+  /**
    * A parameter of an exported function, seen as a source for shell command constructed from library input.
    */
-  class ExternalInputSource extends Source, DataFlow::SourceNode {
+  class ExternalInputSource extends Source {
     ExternalInputSource() {
       this = Exports::getALibraryInputParameter() and
       not (
@@ -93,12 +113,10 @@ module UnsafeShellCommandConstruction {
     StringConcatEndingInCommandExecutionSink() {
       this = root.getALeaf() and
       root = isExecutedAsShellCommand(DataFlow::TypeBackTracker::end(), sys) and
-      exists(string prev | prev = this.getPreviousLeaf().getStringValue() |
-        prev.regexpMatch(".* ('|\")?[0-9a-zA-Z/:_-]*")
-      )
+      exists(this.getPreviousLeaf().getStringValue()) // looks like a shell command construction that could be done safer, it has a known prefix
     }
 
-    override string getSinkType() { result = "String concatenation" }
+    override string getSinkType() { result = "string concatenation" }
 
     override SystemCommandExecution getCommandExecution() { result = sys }
 
@@ -109,23 +127,24 @@ module UnsafeShellCommandConstruction {
    * An element pushed to an array, where the array is later used to execute a shell command.
    */
   class ArrayAppendEndingInCommandExecutinSink extends Sink {
-    DataFlow::SourceNode array;
     SystemCommandExecution sys;
 
     ArrayAppendEndingInCommandExecutinSink() {
-      this =
-        [
-          array.(DataFlow::ArrayCreationNode).getAnElement(),
-          array.getAMethodCall(["push", "unshift"]).getAnArgument()
-        ] and
-      exists(DataFlow::MethodCallNode joinCall | array.getAMethodCall("join") = joinCall |
-        joinCall = isExecutedAsShellCommand(DataFlow::TypeBackTracker::end(), sys) and
-        joinCall.getNumArgument() = 1 and
-        joinCall.getArgument(0).getStringValue() = " "
+      exists(DataFlow::SourceNode array |
+        this =
+          [
+            array.(DataFlow::ArrayCreationNode).getAnElement(),
+            array.getAMethodCall(["push", "unshift"]).getAnArgument()
+          ] and
+        exists(DataFlow::MethodCallNode joinCall | array.getAMethodCall("join") = joinCall |
+          joinCall = isExecutedAsShellCommand(DataFlow::TypeBackTracker::end(), sys) and
+          joinCall.getNumArgument() = 1 and
+          joinCall.getArgument(0).getStringValue() = " "
+        )
       )
     }
 
-    override string getSinkType() { result = "Array element" }
+    override string getSinkType() { result = "array element" }
 
     override SystemCommandExecution getCommandExecution() { result = sys }
 
@@ -136,22 +155,41 @@ module UnsafeShellCommandConstruction {
    * A formatted string that is later executed as a shell command.
    */
   class FormatedStringInCommandExecutionSink extends Sink {
-    PrintfStyleCall call;
     SystemCommandExecution sys;
 
     FormatedStringInCommandExecutionSink() {
-      this = call.getFormatArgument(_) and
-      call = isExecutedAsShellCommand(DataFlow::TypeBackTracker::end(), sys) and
-      exists(string formatString | call.getFormatString().mayHaveStringValue(formatString) |
-        formatString.regexpMatch(".* ('|\")?[0-9a-zA-Z/:_-]*%.*")
+      exists(PrintfStyleCall call |
+        this = call.getFormatArgument(_) and
+        call = isExecutedAsShellCommand(DataFlow::TypeBackTracker::end(), sys) and
+        exists(string formatString | call.getFormatString().mayHaveStringValue(formatString) |
+          formatString.regexpMatch(".* ('|\")?[0-9a-zA-Z/:_-]*%.*")
+        )
       )
     }
 
-    override string getSinkType() { result = "Formatted string" }
+    override string getSinkType() { result = "formatted string" }
 
     override SystemCommandExecution getCommandExecution() { result = sys }
 
     override DataFlow::Node getAlertLocation() { result = this }
+  }
+
+  /**
+   * Holds if the arguments array given to `sys` is joined as a string because `shell` is set to true.
+   */
+  predicate executesArrayAsShell(SystemCommandExecution sys) {
+    sys.getOptionsArg()
+        .getALocalSource()
+        .getAPropertyWrite("shell")
+        .getRhs()
+        .asExpr()
+        .(BooleanLiteral)
+        .getValue() = "true"
+    or
+    exists(API::Node node |
+      node.asSink() = sys.getOptionsArg() and
+      node.getMember("shell").asSink().mayHaveBooleanValue(true)
+    )
   }
 
   /**
@@ -162,14 +200,7 @@ module UnsafeShellCommandConstruction {
   ) {
     t.start() and
     result = sys.getArgumentList().getALocalSource() and
-    // the array gets joined to a string when `shell` is set to true.
-    sys.getOptionsArg()
-        .getALocalSource()
-        .getAPropertyWrite("shell")
-        .getRhs()
-        .asExpr()
-        .(BooleanLiteral)
-        .getValue() = "true"
+    executesArrayAsShell(sys)
     or
     exists(DataFlow::TypeBackTracker t2 |
       result = endsInShellExecutedArray(t2, sys).backtrack(t2, t)
@@ -192,9 +223,13 @@ module UnsafeShellCommandConstruction {
         or
         this = arr.getAMethodCall(["push", "unshift"]).getAnArgument()
       )
+      or
+      this = sys.getArgumentList() and
+      not this instanceof DataFlow::ArrayCreationNode and
+      executesArrayAsShell(sys)
     }
 
-    override string getSinkType() { result = "Shell argument" }
+    override string getSinkType() { result = "shell argument" }
 
     override SystemCommandExecution getCommandExecution() { result = sys }
 
@@ -206,16 +241,17 @@ module UnsafeShellCommandConstruction {
    * Joining a path is similar to string concatenation that automatically inserts slashes.
    */
   class JoinedPathEndingInCommandExecutionSink extends Sink {
-    DataFlow::MethodCallNode joinCall;
     SystemCommandExecution sys;
 
     JoinedPathEndingInCommandExecutionSink() {
-      this = joinCall.getAnArgument() and
-      joinCall = DataFlow::moduleMember("path", ["resolve", "join"]).getACall() and
-      joinCall = isExecutedAsShellCommand(DataFlow::TypeBackTracker::end(), sys)
+      exists(DataFlow::MethodCallNode joinCall |
+        this = joinCall.getAnArgument() and
+        joinCall = DataFlow::moduleMember("path", ["resolve", "join"]).getACall() and
+        joinCall = isExecutedAsShellCommand(DataFlow::TypeBackTracker::end(), sys)
+      )
     }
 
-    override string getSinkType() { result = "Path concatenation" }
+    override string getSinkType() { result = "path concatenation" }
 
     override SystemCommandExecution getCommandExecution() { result = sys }
 
@@ -230,7 +266,7 @@ module UnsafeShellCommandConstruction {
   class ReplaceQuotesSanitizer extends Sanitizer, StringReplaceCall {
     ReplaceQuotesSanitizer() {
       this.getAReplacedString() = "'" and
-      this.isGlobal() and
+      this.maybeGlobal() and
       this.getRawReplacement().mayHaveStringValue(["'\\''", ""])
     }
   }
@@ -255,13 +291,13 @@ module UnsafeShellCommandConstruction {
    * A sanitizer that sanitizers paths that exist in the file-system.
    * For example: `x` is sanitized in `fs.existsSync(x)` or `fs.existsSync(x + "/suffix/path")`.
    */
-  class PathExistsSanitizerGuard extends TaintTracking::SanitizerGuardNode, DataFlow::CallNode {
+  class PathExistsSanitizerGuard extends BarrierGuard, DataFlow::CallNode {
     PathExistsSanitizerGuard() {
       this = DataFlow::moduleMember("path", "exist").getACall() or
       this = DataFlow::moduleMember("fs", "existsSync").getACall()
     }
 
-    override predicate sanitizes(boolean outcome, Expr e) {
+    override predicate blocksExpr(boolean outcome, Expr e) {
       outcome = true and
       (
         e = this.getArgument(0).asExpr() or
@@ -271,19 +307,29 @@ module UnsafeShellCommandConstruction {
   }
 
   /**
-   * A guard of the form `typeof x === "<T>"`, where <T> is  "number", or "boolean",
+   * A guard of the form `typeof x === "<T>"`, where `<T>` is  "number", or "boolean",
    * which sanitizes `x` in its "then" branch.
    */
-  class TypeOfSanitizer extends TaintTracking::SanitizerGuardNode, DataFlow::ValueNode {
+  class TypeOfSanitizer extends BarrierGuard, DataFlow::ValueNode {
     Expr x;
     override EqualityTest astNode;
 
     TypeOfSanitizer() { TaintTracking::isTypeofGuard(astNode, x, ["number", "boolean"]) }
 
-    override predicate sanitizes(boolean outcome, Expr e) {
+    override predicate blocksExpr(boolean outcome, Expr e) {
       outcome = astNode.getPolarity() and
       e = x
     }
+  }
+
+  /** A guard that checks whether `x` is a number. */
+  class NumberGuard extends BarrierGuard instanceof DataFlow::CallNode {
+    Expr x;
+    boolean polarity;
+
+    NumberGuard() { TaintTracking::isNumberGuard(this, x, polarity) }
+
+    override predicate blocksExpr(boolean outcome, Expr e) { e = x and outcome = polarity }
   }
 
   private import semmle.javascript.dataflow.internal.AccessPaths

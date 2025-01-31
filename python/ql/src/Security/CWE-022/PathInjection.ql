@@ -17,8 +17,10 @@
  */
 
 import python
-import semmle.python.security.dataflow.PathInjection
+import semmle.python.security.dataflow.PathInjectionQuery
+import PathInjectionFlow::PathGraph
 
-from CustomPathNode source, CustomPathNode sink
-where pathInjection(source, sink)
-select sink, source, sink, "This path depends on $@.", source, "a user-provided value"
+from PathInjectionFlow::PathNode source, PathInjectionFlow::PathNode sink
+where PathInjectionFlow::flowPath(source, sink)
+select sink.getNode(), source, sink, "This path depends on a $@.", source.getNode(),
+  "user-provided value"

@@ -9,7 +9,7 @@ import semmle.code.java.frameworks.jackson.JacksonSerializability
  *
  * This defines the set of fields for which we will determine liveness.
  */
-library class SourceField extends Field {
+class SourceField extends Field {
   SourceField() { this.fromSource() }
 }
 
@@ -87,13 +87,13 @@ abstract class WhitelistedLiveField extends Field { }
  * A static, final, long field named `serialVersionUID` in a class that extends `Serializable` acts as
  * a version number for the serialization framework.
  */
-class SerialVersionUIDField extends ReflectivelyReadField {
-  SerialVersionUIDField() {
+class SerialVersionUidField extends ReflectivelyReadField {
+  SerialVersionUidField() {
     this.hasName("serialVersionUID") and
     this.isStatic() and
     this.isFinal() and
     this.getType().hasName("long") and
-    this.getDeclaringType().getASupertype*() instanceof TypeSerializable
+    this.getDeclaringType().getAnAncestor() instanceof TypeSerializable
   }
 }
 
@@ -127,7 +127,7 @@ class JUnitAnnotatedField extends ReflectivelyReadField {
  */
 class ClassReflectivelyReadField extends ReflectivelyReadField {
   ClassReflectivelyReadField() {
-    exists(ReflectiveFieldAccess fieldAccess | this = fieldAccess.inferAccessedField())
+    exists(ReflectiveGetFieldCall fieldAccess | this = fieldAccess.inferAccessedField())
   }
 }
 
@@ -135,7 +135,8 @@ class ClassReflectivelyReadField extends ReflectivelyReadField {
  * Consider all `JacksonSerializableField`s as reflectively read.
  */
 class JacksonSerializableReflectivelyReadField extends ReflectivelyReadField,
-  JacksonSerializableField { }
+  JacksonSerializableField
+{ }
 
 /**
  * A field that is used when applying Jackson mixins.
@@ -154,8 +155,8 @@ class JacksonMixinReflextivelyReadField extends ReflectivelyReadField {
 /**
  * A field which is read by a JPA compatible Java persistence framework.
  */
-class JPAReadField extends ReflectivelyReadField {
-  JPAReadField() {
+class JpaReadField extends ReflectivelyReadField {
+  JpaReadField() {
     exists(PersistentEntity entity |
       this = entity.getAField() and
       (

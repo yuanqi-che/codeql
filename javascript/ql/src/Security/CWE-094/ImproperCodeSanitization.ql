@@ -14,9 +14,9 @@
 
 import javascript
 import semmle.javascript.security.dataflow.ImproperCodeSanitizationQuery
-import DataFlow::PathGraph
 private import semmle.javascript.heuristics.HeuristicSinks
 private import semmle.javascript.security.dataflow.CodeInjectionCustomizations
+import ImproperCodeSanitizationFlow::PathGraph
 
 /**
  * Gets a type-tracked instance of `RemoteFlowSource` using type-tracker `t`.
@@ -50,7 +50,7 @@ private DataFlow::Node endsInCodeInjectionSink(DataFlow::TypeBackTracker t) {
     not result instanceof StringOps::ConcatenationRoot // the heuristic CodeInjection sink looks for string-concats, we are not interrested in those here.
   )
   or
-  exists(DataFlow::TypeBackTracker t2 | t = t2.smallstep(result, endsInCodeInjectionSink(t2)))
+  exists(DataFlow::TypeBackTracker t2 | t2 = t.smallstep(result, endsInCodeInjectionSink(t2)))
 }
 
 /**
@@ -60,13 +60,13 @@ private DataFlow::Node endsInCodeInjectionSink() {
   result = endsInCodeInjectionSink(DataFlow::TypeBackTracker::end())
 }
 
-from Configuration cfg, DataFlow::PathNode source, DataFlow::PathNode sink
+from ImproperCodeSanitizationFlow::PathNode source, ImproperCodeSanitizationFlow::PathNode sink
 where
-  cfg.hasFlowPath(source, sink) and
+  ImproperCodeSanitizationFlow::flowPath(source, sink) and
   // Basic detection of duplicate results with `js/code-injection`.
   not (
     sink.getNode().(StringOps::ConcatenationLeaf).getRoot() = endsInCodeInjectionSink() and
     remoteFlow() = source.getNode().(DataFlow::InvokeNode).getAnArgument()
   )
-select sink.getNode(), source, sink, "$@ flows to here and is used to construct code.",
-  source.getNode(), "Improperly sanitized value"
+select sink.getNode(), source, sink, "Code construction depends on an $@.", source.getNode(),
+  "improperly sanitized value"

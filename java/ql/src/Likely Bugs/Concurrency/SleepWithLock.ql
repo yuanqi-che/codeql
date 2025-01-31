@@ -14,7 +14,7 @@
 
 import java
 
-from MethodAccess ma, Method sleep
+from MethodCall ma, Method sleep
 where
   ma.getMethod() = sleep and
   sleep.hasName("sleep") and
@@ -23,4 +23,4 @@ where
     ma.getEnclosingStmt().getEnclosingStmt*() instanceof SynchronizedStmt or
     ma.getEnclosingCallable().isSynchronized()
   )
-select ma, "sleep() with lock held."
+select ma, "This calls 'Thread.sleep()' with a lock held."

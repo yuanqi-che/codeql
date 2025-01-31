@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace EFCoreTests
 {
-    class Person
+    public class Person
     {
         public virtual int Id { get; set; }
         public virtual string Name { get; set; }
@@ -18,13 +18,13 @@ namespace EFCoreTests
         public ICollection<Address> Addresses { get; set; }
     }
 
-    class Address
+    public class Address
     {
         public int Id { get; set; }
         public string Street { get; set; }
     }
 
-    class PersonAddressMap
+    public class PersonAddressMap
     {
         public int Id { get; set; }
         public int PersonId { get; set; }
@@ -35,7 +35,7 @@ namespace EFCoreTests
         public Address Address { get; set; }
     }
 
-    class MyContext : DbContext
+    public class MyContext : DbContext
     {
         public virtual DbSet<Person> Persons { get; set; }
         public virtual DbSet<Address> Addresses { get; set; }
@@ -56,7 +56,7 @@ namespace EFCoreTests
 
         Microsoft.EntityFrameworkCore.Storage.IRawSqlCommandBuilder builder;
 
-        async void SqlExprs(MyContext ctx)
+        async void SqlExprs(MyContext ctx, System.Threading.CancellationToken token)
         {
             // Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.ExecuteSqlCommand
             ctx.Database.ExecuteSqlCommand("");  // SqlExpr
@@ -68,6 +68,13 @@ namespace EFCoreTests
             // Microsoft.EntityFrameworkCore.RawSqlString
             new RawSqlString("");  // SqlExpr
             RawSqlString str = "";  // SqlExpr
+
+            ctx.Persons.FromSqlRaw("sql");
+            ctx.Database.ExecuteSqlRaw("sql", (IEnumerable<object>)null);
+            ctx.Database.ExecuteSqlRaw("sql");
+            await ctx.Database.ExecuteSqlRawAsync("sql", token);
+            await ctx.Database.ExecuteSqlRawAsync("sql");
+            await ctx.Database.ExecuteSqlRawAsync("sql", (IEnumerable<object>)null, token);
         }
 
         void TestRawSqlStringDataFlow()

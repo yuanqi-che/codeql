@@ -16,14 +16,14 @@ namespace ASP
         {
             Layout = "~/_SiteLayout.cshtml";
             Page.Title = "Contact";
-            var sayHi = Request.QueryString["sayHi"];
+            var sayHi = Request.QueryString["sayHi"]; // $ Source=sayHi
             if (sayHi.IsEmpty())
             {
                 WriteLiteral("<script>alert(\"XSS via WriteLiteral\")</script>"); // GOOD: hard-coded, not user input
             }
             else
             {
-                WriteLiteral(sayHi); // BAD: user input flows to HTML unencoded
+                WriteLiteral(sayHi); // $ Alert=sayHi
                 WriteLiteral(HttpUtility.HtmlEncode(sayHi)); // Good: user input is encoded before it flows to HTML
             }
 
@@ -33,18 +33,17 @@ namespace ASP
             }
             else
             {
-                WriteLiteralTo(Output, sayHi); // BAD: user input flows to HTML unencoded
+                WriteLiteralTo(Output, sayHi); // $ Alert=sayHi
                 WriteLiteralTo(Output, Html.Encode(sayHi)); // Good: user input is encoded before it flows to HTML
             }
 
             BeginContext("~/Views/Home/Contact.cshtml", 288, 32, false);
 
             Write(Html.Raw("<script>alert(\"XSS via Html.Raw()\")</script>")); // GOOD: hard-coded, not user input
-            Write(Html.Raw(Request.QueryString["sayHi"])); // BAD: user input flows to HTML unencoded
-            Write(Html.Raw(HttpContext.Current.Server.HtmlEncode(Request.QueryString["sayHi"]))); // Good: user input is encoded before it flows to HTML
+            var sayHi2 = Request.QueryString["sayHi"]; // $ Source=sayHi2
+            Write(Html.Raw(sayHi2)); // $ Alert=sayHi2
+            Write(Html.Raw(HttpContext.Current.Server.HtmlEncode(sayHi2))); // Good: user input is encoded before it flows to HTML
             EndContext("~/Views/Home/Contact.cshtml", 288, 32, false);
         }
     }
 }
-
-// source-extractor-options: /r:${testdir}/../../../../../packages/Microsoft.AspNet.WebPages.3.2.3/lib/net45/System.Web.WebPages.dll /r:${testdir}/../../../../../packages/Microsoft.AspNet.Mvc.5.2.3/lib/net45/System.Web.Mvc.dll /r:System.Dynamic.Runtime.dll /r:System.Runtime.Extensions.dll /r:System.Linq.Expressions.dll /r:System.Web.dll /r:C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Web.dll /r:System.Collections.Specialized.dll

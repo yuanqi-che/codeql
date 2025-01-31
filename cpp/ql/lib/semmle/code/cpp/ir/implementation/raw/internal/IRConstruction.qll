@@ -11,8 +11,10 @@ private import InstructionTag
 private import TranslatedCondition
 private import TranslatedElement
 private import TranslatedExpr
+private import TranslatedCall
 private import TranslatedStmt
 private import TranslatedFunction
+private import TranslatedGlobalVar
 
 TranslatedElement getInstructionTranslatedElement(Instruction instruction) {
   instruction = TRawInstruction(result, _)
@@ -36,35 +38,54 @@ module Raw {
   predicate functionHasIR(Function func) { exists(getTranslatedFunction(func)) }
 
   cached
+  predicate varHasIRFunc(Variable var) {
+    (
+      var instanceof GlobalOrNamespaceVariable
+      or
+      not var.isFromUninstantiatedTemplate(_) and
+      var instanceof StaticInitializedStaticLocalVariable
+    ) and
+    var.hasInitializer() and
+    (
+      not var.getType().isDeeplyConst()
+      or
+      var.getInitializer().getExpr() instanceof StringLiteral
+    )
+  }
+
+  cached
   predicate hasInstruction(TranslatedElement element, InstructionTag tag) {
     element.hasInstruction(_, tag, _)
   }
 
   cached
-  predicate hasUserVariable(Function func, Variable var, CppType type) {
-    getTranslatedFunction(func).hasUserVariable(var, type)
+  predicate hasUserVariable(Declaration decl, Variable var, CppType type) {
+    getTranslatedFunction(decl).hasUserVariable(var, type)
+    or
+    getTranslatedVarInit(decl).hasUserVariable(var, type)
   }
 
   cached
-  predicate hasTempVariable(Function func, Locatable ast, TempVariableTag tag, CppType type) {
+  predicate hasTempVariable(Declaration decl, Locatable ast, TempVariableTag tag, CppType type) {
     exists(TranslatedElement element |
-      element.getAST() = ast and
-      func = element.getFunction() and
+      element.getAst() = ast and
+      decl = element.getFunction() and
       element.hasTempVariable(tag, type)
     )
   }
 
   cached
-  predicate hasStringLiteral(Function func, Locatable ast, CppType type, StringLiteral literal) {
+  predicate hasStringLiteral(Declaration decl, Locatable ast, CppType type, StringLiteral literal) {
     literal = ast and
-    literal.getEnclosingFunction() = func and
+    literal.getEnclosingDeclaration() = decl and
     getTypeForPRValue(literal.getType()) = type
   }
 
   cached
-  predicate hasDynamicInitializationFlag(Function func, StaticLocalVariable var, CppType type) {
+  predicate hasDynamicInitializationFlag(
+    Function func, RuntimeInitializedStaticLocalVariable var, CppType type
+  ) {
     var.getFunction() = func and
-    var.hasDynamicInitialization() and
     type = getBoolType()
   }
 
@@ -75,7 +96,7 @@ module Raw {
       tag = getInstructionTag(instruction) and
       (
         result = element.getInstructionVariable(tag) or
-        result.(IRStringLiteral).getAST() = element.getInstructionStringLiteral(tag)
+        result.(IRStringLiteral).getAst() = element.getInstructionStringLiteral(tag)
       )
     )
   }
@@ -150,6 +171,23 @@ module Raw {
       // forwarded the result of another translated expression.
       instruction = translatedExpr.getInstruction(_)
     )
+    or
+    // Consider the snippet `if(x) { ... }` where `x` is an integer.
+    // In C++ there is a `BoolConversion` conversion on `x` which generates a
+    // `CompareNEInstruction` whose `getInstructionConvertedResultExpression`
+    // is the `BoolConversion` (by the logic in the disjunct above). Thus,
+    // calling `getInstructionUnconvertedResultExpression` on the
+    // `CompareNEInstruction` gives `x` in C++ code.
+    // However, in C there is no such conversion to return. So instead we have
+    // to map the result of `getInstructionConvertedResultExpression` on the
+    // `CompareNEInstruction` to `x` manually. This ensures that calling
+    // `getInstructionUnconvertedResultExpression` on the `CompareNEInstruction`
+    // gives `x` in both the C case and C++ case.
+    exists(TranslatedValueCondition translatedValueCondition |
+      translatedValueCondition = getTranslatedCondition(result) and
+      translatedValueCondition.shouldGenerateCompareNE() and
+      instruction = translatedValueCondition.getInstruction(ValueConditionCompareTag())
+    )
   }
 
   cached
@@ -158,9 +196,9 @@ module Raw {
   }
 }
 
-class TStageInstruction = TRawInstruction;
+class TStageInstruction = TRawInstruction or TRawUnreachedInstruction;
 
-predicate hasInstruction(TRawInstruction instr) { any() }
+predicate hasInstruction(TStageInstruction instr) { any() }
 
 predicate hasModeledMemoryResult(Instruction instruction) { none() }
 
@@ -181,12 +219,6 @@ Instruction getMemoryOperandDefinition(
 ) {
   none()
 }
-
-/**
- * Holds if the partial operand of this `ChiInstruction` updates the bit range
- * `[startBitOffset, endBitOffset)` of the total operand.
- */
-predicate getIntervalUpdatedByChi(ChiInstruction chi, int startBit, int endBit) { none() }
 
 /**
  * Holds if the operand totally overlaps with its definition and consumes the
@@ -243,12 +275,6 @@ CppType getInstructionOperandType(Instruction instruction, TypedOperandTag tag) 
         .getInstructionMemoryOperandType(getInstructionTag(instruction), tag)
 }
 
-Instruction getPhiOperandDefinition(
-  PhiInstruction instruction, IRBlock predecessorBlock, Overlap overlap
-) {
-  none()
-}
-
 Instruction getPhiInstructionBlockStart(PhiInstruction instr) { none() }
 
 Instruction getInstructionSuccessor(Instruction instruction, EdgeKind kind) {
@@ -271,7 +297,7 @@ private predicate backEdgeCandidate(
   // is a back edge. This includes edges from `continue` and the fall-through
   // edge(s) after the last instruction(s) in the body.
   exists(TranslatedWhileStmt s |
-    targetInstruction = s.getFirstConditionInstruction() and
+    targetInstruction = s.getFirstConditionInstruction(_) and
     targetInstruction = sourceElement.getInstructionSuccessor(sourceTag, kind) and
     requiredAncestor = s.getBody()
   )
@@ -282,7 +308,7 @@ private predicate backEdgeCandidate(
   // { ... } while (0)` statement. Note that all `continue` statements in a
   // do-while loop produce forward edges.
   exists(TranslatedDoStmt s |
-    targetInstruction = s.getBody().getFirstInstruction() and
+    targetInstruction = s.getBody().getFirstInstruction(_) and
     targetInstruction = sourceElement.getInstructionSuccessor(sourceTag, kind) and
     requiredAncestor = s.getCondition()
   )
@@ -294,7 +320,7 @@ private predicate backEdgeCandidate(
   // last instruction(s) in the body. A for loop may not have a condition, in
   // which case `getFirstConditionInstruction` returns the body instead.
   exists(TranslatedForStmt s |
-    targetInstruction = s.getFirstConditionInstruction() and
+    targetInstruction = s.getFirstConditionInstruction(_) and
     targetInstruction = sourceElement.getInstructionSuccessor(sourceTag, kind) and
     (
       requiredAncestor = s.getUpdate()
@@ -308,7 +334,7 @@ private predicate backEdgeCandidate(
   // Any edge from within the update of the loop to the condition of
   // the loop is a back edge.
   exists(TranslatedRangeBasedForStmt s |
-    targetInstruction = s.getCondition().getFirstInstruction() and
+    targetInstruction = s.getCondition().getFirstInstruction(_) and
     targetInstruction = sourceElement.getInstructionSuccessor(sourceTag, kind) and
     requiredAncestor = s.getUpdate()
   )
@@ -339,7 +365,7 @@ Instruction getInstructionBackEdgeSuccessor(Instruction instruction, EdgeKind ki
   // such a `goto` creates a back edge.
   exists(TranslatedElement s, GotoStmt goto |
     not isStrictlyForwardGoto(goto) and
-    goto = s.getAST() and
+    goto = s.getAst() and
     exists(InstructionTag tag |
       result = s.getInstructionSuccessor(tag, kind) and
       instruction = s.getInstruction(tag)
@@ -349,23 +375,40 @@ Instruction getInstructionBackEdgeSuccessor(Instruction instruction, EdgeKind ki
 
 /** Holds if `goto` jumps strictly forward in the program text. */
 private predicate isStrictlyForwardGoto(GotoStmt goto) {
-  goto.getLocation().isBefore(goto.getTarget().getLocation())
+  goto.getLocation().isBefore(goto.getTarget().getLocation(), _)
 }
 
-Locatable getInstructionAST(TStageInstruction instr) {
-  result = getInstructionTranslatedElement(instr).getAST()
+Locatable getInstructionAst(TStageInstruction instr) {
+  result = getInstructionTranslatedElement(instr).getAst()
+  or
+  exists(IRFunction irFunc |
+    instr = TRawUnreachedInstruction(irFunc) and
+    result = irFunc.getFunction()
+  )
 }
 
 CppType getInstructionResultType(TStageInstruction instr) {
   getInstructionTranslatedElement(instr).hasInstruction(_, getInstructionTag(instr), result)
+  or
+  instr instanceof TRawUnreachedInstruction and
+  result = getVoidType()
+}
+
+IRType getInstructionResultIRType(Instruction instr) {
+  result = instr.getResultLanguageType().getIRType()
 }
 
 predicate getInstructionOpcode(Opcode opcode, TStageInstruction instr) {
   getInstructionTranslatedElement(instr).hasInstruction(opcode, getInstructionTag(instr), _)
+  or
+  instr instanceof TRawUnreachedInstruction and
+  opcode instanceof Opcode::Unreached
 }
 
 IRFunctionBase getInstructionEnclosingIRFunction(TStageInstruction instr) {
   result.getFunction() = getInstructionTranslatedElement(instr).getFunction()
+  or
+  instr = TRawUnreachedInstruction(result)
 }
 
 Instruction getPrimaryInstructionForSideEffect(SideEffectInstruction instruction) {
@@ -373,6 +416,15 @@ Instruction getPrimaryInstructionForSideEffect(SideEffectInstruction instruction
     getInstructionTranslatedElement(instruction)
         .getPrimaryInstructionForSideEffect(getInstructionTag(instruction))
 }
+
+predicate hasUnreachedInstruction(IRFunction func) {
+  exists(Call c |
+    c.getEnclosingFunction() = func.getFunction() and
+    any(Options opt).exits(c.getTarget())
+  )
+}
+
+IRVariable getAnUninitializedGroupVariable(UninitializedGroupInstruction instr) { none() }
 
 import CachedForDebugging
 
@@ -389,7 +441,12 @@ private module CachedForDebugging {
   cached
   predicate instructionHasSortKeys(Instruction instruction, int key1, int key2) {
     key1 = getInstructionTranslatedElement(instruction).getId() and
-    getInstructionTag(instruction) =
+    getInstructionTag(instruction) = tagByRank(key2)
+  }
+
+  pragma[nomagic]
+  private InstructionTag tagByRank(int key2) {
+    result =
       rank[key2](InstructionTag tag, string tagId |
         tagId = getInstructionTagId(tag)
       |

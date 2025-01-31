@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Semmle.Util
@@ -16,7 +17,7 @@ namespace Semmle.Util
         bool HandleOption(string key, string value);
 
         /// <summary>
-        /// Handle a flag of the form "--cil" or "--nocil"
+        /// Handle a flag of the form "--cache" or "--nocache"
         /// </summary>
         /// <param name="key">The name of the flag. This is case sensitive.</param>
         /// <param name="value">True if set, or false if prefixed by "--no"</param>
@@ -39,8 +40,26 @@ namespace Semmle.Util
 
     public static class OptionsExtensions
     {
-        public static void ParseArguments(this ICommandLineOptions options, IReadOnlyList<string> arguments)
+        private static readonly string[] ExtractorOptions = ["trap_compression"];
+        private static List<string> GetExtractorOptions()
         {
+            var extractorOptions = new List<string>();
+
+            foreach (var option in ExtractorOptions)
+            {
+                var value = EnvironmentVariables.GetExtractorOption(option);
+                if (!string.IsNullOrEmpty(value))
+                {
+                    extractorOptions.Add($"--{option}:{value}");
+                }
+            }
+            return extractorOptions;
+        }
+
+        public static void ParseArguments(this ICommandLineOptions options, IReadOnlyList<string> providedArguments)
+        {
+            var arguments = GetExtractorOptions();
+            arguments.AddRange(providedArguments);
             for (var i = 0; i < arguments.Count; ++i)
             {
                 var arg = arguments[i];

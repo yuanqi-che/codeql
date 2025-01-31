@@ -2,7 +2,7 @@ import python
 import Loop
 import semmle.python.dataflow.TaintTracking
 
-/** Marker for "uninitialized". */
+/** A marker for "uninitialized". */
 class Uninitialized extends TaintKind {
   Uninitialized() { this = "undefined" }
 }
@@ -55,7 +55,7 @@ predicate exitFunctionGuardedEdge(EssaVariable pred, EssaVariable succ) {
 }
 
 class UninitializedConfig extends TaintTracking::Configuration {
-  UninitializedConfig() { this = "Unitialized local config" }
+  UninitializedConfig() { this = "Uninitialized local config" }
 
   override predicate isSource(DataFlow::Node source, TaintKind kind) {
     kind instanceof Uninitialized and
@@ -73,11 +73,11 @@ class UninitializedConfig extends TaintTracking::Configuration {
   override predicate isBarrier(DataFlow::Node node, TaintKind kind) {
     kind instanceof Uninitialized and
     (
-      definition(node.asVariable())
+      this.definition(node.asVariable())
       or
-      use(node.asVariable())
+      this.use(node.asVariable())
       or
-      sanitizingNode(node.asCfgNode())
+      this.sanitizingNode(node.asCfgNode())
     )
   }
 

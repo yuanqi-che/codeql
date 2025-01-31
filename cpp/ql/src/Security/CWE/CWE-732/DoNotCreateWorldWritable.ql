@@ -12,22 +12,23 @@
 
 import cpp
 import FilePermissions
-import semmle.code.cpp.commons.unix.Constants
+import semmle.code.cpp.ConfigurationTestFile
 
 predicate worldWritableCreation(FileCreationExpr fc, int mode) {
   mode = localUmask(fc).mask(fc.getMode()) and
-  sets(mode, s_iwoth())
+  setsAnyBits(mode, UnixConstants::s_iwoth())
 }
 
 predicate setWorldWritable(FunctionCall fc, int mode) {
   fc.getTarget().getName() = ["chmod", "fchmod", "_chmod", "_wchmod"] and
   mode = fc.getArgument(1).getValue().toInt() and
-  sets(mode, s_iwoth())
+  setsAnyBits(mode, UnixConstants::s_iwoth())
 }
 
 from Expr fc, int mode, string message
 where
   worldWritableCreation(fc, mode) and
+  not fc.getFile() instanceof ConfigurationTestFile and // expressions in files generated during configuration are likely false positives
   message =
     "A file may be created here with mode " + octalFileMode(mode) +
       ", which would make it world-writable."

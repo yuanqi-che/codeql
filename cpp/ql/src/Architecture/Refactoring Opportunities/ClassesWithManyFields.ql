@@ -21,7 +21,7 @@ string kindstr(Class c) {
     or
     kind = 2 and result = "Class"
     or
-    kind = 6 and result = "Template class"
+    kind = [15, 16] and result = "Template class"
   )
 }
 
@@ -63,17 +63,17 @@ class VariableDeclarationLine extends TVariableDeclarationInfo {
   /**
    * Gets a `VariableDeclarationEntry` on this line.
    */
-  VariableDeclarationEntry getAVDE() { vdeInfo(result, c, f, line) }
+  VariableDeclarationEntry getAVde() { vdeInfo(result, c, f, line) }
 
   /**
    * Gets the start column of the first `VariableDeclarationEntry` on this line.
    */
-  int getStartColumn() { result = min(this.getAVDE().getLocation().getStartColumn()) }
+  int getStartColumn() { result = min(this.getAVde().getLocation().getStartColumn()) }
 
   /**
    * Gets the end column of the last `VariableDeclarationEntry` on this line.
    */
-  int getEndColumn() { result = max(this.getAVDE().getLocation().getEndColumn()) }
+  int getEndColumn() { result = max(this.getAVde().getLocation().getEndColumn()) }
 
   /**
    * Gets the rank of this `VariableDeclarationLine` in its file and class
@@ -134,13 +134,13 @@ class VariableDeclarationGroup extends VariableDeclarationLine {
       count(VariableDeclarationLine l |
         l = this.getProximateNext*()
       |
-        l.getAVDE().getVariable().getName()
+        l.getAVde().getVariable().getName()
       )
   }
 
   override string toString() {
     this.getCount() = 1 and
-    result = "declaration of " + this.getAVDE().getVariable().getName()
+    result = "declaration of " + this.getAVde().getVariable().getName()
     or
     this.getCount() > 1 and
     result = "group of " + this.getCount() + " fields here"
@@ -168,12 +168,7 @@ where
     strictcount(string fieldName |
       exists(Field f |
         f.getDeclaringType() = c and
-        fieldName = f.getName() and
-        // IBOutlet's are a way of building GUIs
-        // automatically out of ObjC properties.
-        // We don't want to count those for the
-        // purposes of this query.
-        not f.getType().getAnAttribute().hasName("iboutlet")
+        fieldName = f.getName()
       )
     ) and
   n > 15 and

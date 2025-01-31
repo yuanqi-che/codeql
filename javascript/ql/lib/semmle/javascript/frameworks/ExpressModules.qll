@@ -16,74 +16,71 @@ module ExpressLibraries {
   }
 
   /**
-   * Header produced by a route handler of the "x-frame-options" module.
+   * A header produced by a route handler of the "x-frame-options" module.
    */
-  class XFrameOptionsRouteHandlerHeader extends HTTP::ImplicitHeaderDefinition {
-    XFrameOptionsRouteHandlerHeader() { this instanceof XFrameOptionsRouteHandler }
-
+  class XFrameOptionsRouteHandlerHeader extends Http::ImplicitHeaderDefinition instanceof XFrameOptionsRouteHandler
+  {
     override predicate defines(string headerName, string headerValue) {
       xFrameOptionsDefaultImplicitHeaderDefinition(headerName, headerValue)
     }
 
-    override HTTP::RouteHandler getRouteHandler() { result = this }
+    override Http::RouteHandler getRouteHandler() { result = this }
   }
 
   /**
-   * Route handler from the "x-frame-options" module.
+   * A route handler from the "x-frame-options" module.
    */
-  class XFrameOptionsRouteHandler extends HTTP::RouteHandler {
+  class XFrameOptionsRouteHandler extends Http::RouteHandler {
     XFrameOptionsRouteHandler() {
       this = DataFlow::moduleImport("x-frame-options").getAnInvocation()
     }
 
-    override HTTP::HeaderDefinition getAResponseHeader(string name) {
+    override Http::HeaderDefinition getAResponseHeader(string name) {
       name = this.(XFrameOptionsRouteHandlerHeader).getAHeaderName() and
       result = this
     }
   }
 
   /**
-   * Header produced by a route handler of the "frameguard" module.
+   * A header produced by a route handler of the "frameguard" module.
    */
-  class FrameGuardRouteHandlerHeader extends HTTP::ImplicitHeaderDefinition {
-    FrameGuardRouteHandlerHeader() { this instanceof FrameGuardRouteHandler }
-
+  class FrameGuardRouteHandlerHeader extends Http::ImplicitHeaderDefinition instanceof FrameGuardRouteHandler
+  {
     override predicate defines(string headerName, string headerValue) {
       xFrameOptionsDefaultImplicitHeaderDefinition(headerName, headerValue)
     }
 
-    override HTTP::RouteHandler getRouteHandler() { result = this }
+    override Http::RouteHandler getRouteHandler() { result = this }
   }
 
   /**
-   * Route handler from the "frameguard" module.
+   * A route handler from the "frameguard" module.
    */
-  class FrameGuardRouteHandler extends HTTP::RouteHandler {
+  class FrameGuardRouteHandler extends Http::RouteHandler {
     FrameGuardRouteHandler() { this = DataFlow::moduleImport("frameguard").getAnInvocation() }
 
-    override HTTP::HeaderDefinition getAResponseHeader(string name) {
+    override Http::HeaderDefinition getAResponseHeader(string name) {
       name = this.(FrameGuardRouteHandlerHeader).getAHeaderName() and
       result = this
     }
   }
 
   /**
-   * Header produced by a route handler of the "helmet" module.
+   * A header produced by a route handler of the "helmet" module.
    */
-  class HelmetRouteHandlerHeader extends HTTP::ImplicitHeaderDefinition {
-    HelmetRouteHandlerHeader() { this instanceof HelmetRouteHandler }
-
+  class HelmetRouteHandlerHeader extends Http::ImplicitHeaderDefinition instanceof HelmetRouteHandler
+  {
     override predicate defines(string headerName, string headerValue) {
       xFrameOptionsDefaultImplicitHeaderDefinition(headerName, headerValue)
     }
 
-    override HTTP::RouteHandler getRouteHandler() { result = this }
+    override Http::RouteHandler getRouteHandler() { result = this }
   }
 
   /**
-   * Route handler from the "helmet" module.
+   * A route handler from the "helmet" module.
    */
-  class HelmetRouteHandler extends HTTP::RouteHandler {
+  class HelmetRouteHandler extends Http::RouteHandler {
     HelmetRouteHandler() {
       exists(DataFlow::ModuleImportNode m | "helmet" = m.getPath() |
         this = m.getAnInvocation() or
@@ -91,7 +88,7 @@ module ExpressLibraries {
       )
     }
 
-    override HTTP::HeaderDefinition getAResponseHeader(string name) {
+    override Http::HeaderDefinition getAResponseHeader(string name) {
       name = this.(HelmetRouteHandlerHeader).getAHeaderName() and
       result = this
     }
@@ -108,16 +105,16 @@ module ExpressLibraries {
     /**
      * A call that creates an `express-session` middleware instance.
      */
-    class MiddlewareInstance extends DataFlow::InvokeNode, HTTP::CookieMiddlewareInstance {
+    class MiddlewareInstance extends DataFlow::InvokeNode, Http::CookieMiddlewareInstance {
       MiddlewareInstance() { this = expressSession().getACall() }
 
       /**
        * Gets the expression for property `name` of the options object of this call.
        */
-      DataFlow::Node getOption(string name) { result = getOptionArgument(0, name) }
+      DataFlow::Node getOption(string name) { result = this.getOptionArgument(0, name) }
 
       override DataFlow::Node getASecretKey() {
-        exists(DataFlow::Node secret | secret = getOption("secret") |
+        exists(DataFlow::Node secret | secret = this.getOption("secret") |
           if exists(DataFlow::ArrayCreationNode arr | arr.flowsTo(secret))
           then result = any(DataFlow::ArrayCreationNode arr | arr.flowsTo(secret)).getAnElement()
           else result = secret
@@ -135,16 +132,16 @@ module ExpressLibraries {
     /**
      * A call that creates a `cookie-parser` middleware instance.
      */
-    class MiddlewareInstance extends DataFlow::InvokeNode, HTTP::CookieMiddlewareInstance {
+    class MiddlewareInstance extends DataFlow::InvokeNode, Http::CookieMiddlewareInstance {
       MiddlewareInstance() { this = cookieParser().getACall() }
 
       /**
        * Gets the expression for property `name` of the options object of this call.
        */
-      DataFlow::Node getOption(string name) { result = getOptionArgument(1, name) }
+      DataFlow::Node getOption(string name) { result = this.getOptionArgument(1, name) }
 
       override DataFlow::Node getASecretKey() {
-        exists(DataFlow::Node arg0 | arg0 = getArgument(0) |
+        exists(DataFlow::Node arg0 | arg0 = this.getArgument(0) |
           if exists(DataFlow::ArrayCreationNode arr | arr.flowsTo(arg0))
           then result = any(DataFlow::ArrayCreationNode arr | arr.flowsTo(arg0)).getAnElement()
           else result = arg0
@@ -164,19 +161,19 @@ module ExpressLibraries {
     /**
      * A call that creates a `cookie-session` middleware instance.
      */
-    class MiddlewareInstance extends DataFlow::InvokeNode, HTTP::CookieMiddlewareInstance {
+    class MiddlewareInstance extends DataFlow::InvokeNode, Http::CookieMiddlewareInstance {
       MiddlewareInstance() { this = cookieSession().getACall() }
 
       /**
        * Gets the expression for property `name` of the options object of this call.
        */
-      DataFlow::Node getOption(string name) { result = getOptionArgument(0, name) }
+      DataFlow::Node getOption(string name) { result = this.getOptionArgument(0, name) }
 
       override DataFlow::Node getASecretKey() {
-        result = getOption("secret")
+        result = this.getOption("secret")
         or
         exists(DataFlow::ArrayCreationNode keys |
-          keys.flowsTo(getOption("keys")) and
+          keys.flowsTo(this.getOption("keys")) and
           result = keys.getAnElement()
         )
       }
@@ -216,14 +213,14 @@ module ExpressLibraries {
      */
     predicate isExtendedUrlEncoded() {
       kind = "urlencoded" and
-      not getOptionArgument(0, "extended").mayHaveBooleanValue(false)
+      not this.getOptionArgument(0, "extended").mayHaveBooleanValue(false)
     }
 
     /**
      * Holds if this parses the input as JSON or extended URL-encoding, resulting
      * in user-controlled objects (as opposed to user-controlled strings).
      */
-    predicate producesUserControlledObjects() { isJson() or isExtendedUrlEncoded() }
+    predicate producesUserControlledObjects() { this.isJson() or this.isExtendedUrlEncoded() }
   }
 }
 
@@ -248,7 +245,7 @@ module FileUpload {
       this = filesRef(_, DataFlow::TypeTracker::end()).getAPropertyRead().getAMethodCall("mv")
     }
 
-    override DataFlow::Node getAPathArgument() { result = getArgument(0) }
+    override DataFlow::Node getAPathArgument() { result = this.getArgument(0) }
 
     override DataFlow::Node getADataNode() { none() }
   }

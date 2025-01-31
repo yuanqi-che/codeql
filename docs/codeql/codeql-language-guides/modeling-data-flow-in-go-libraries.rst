@@ -7,22 +7,22 @@ When analyzing a Go program, CodeQL does not examine the source code for
 external packages. To track the flow of untrusted data through a library, you
 can create a model of the library.
 
-You can find existing models in the ``ql/src/semmle/go/frameworks/`` folder of the
-`CodeQL for Go repository <https://github.com/github/codeql-go/tree/main/ql/src/semmle/go/frameworks>`__.
+You can find existing models in the ``go/ql/lib/semmle/go/frameworks/`` folder of the
+`CodeQL repository <https://github.com/github/codeql/tree/main/go/ql/lib/semmle/go/frameworks>`__.
 To add a new model, you should make a new file in that folder, named after the library.
 
 Sources
 -------
 
 To mark a source of data that is controlled by an untrusted user, we
-create a class extending ``UntrustedFlowSource::Range``. Inheritance and
+create a class extending ``RemoteFlowSource::Range``. Inheritance and
 the characteristic predicate of the class should be used to specify
 exactly the dataflow node that introduces the data. Here is a short
 example from ``Mux.qll``.
 
 .. code-block:: ql
 
-   class RequestVars extends DataFlow::UntrustedFlowSource::Range, DataFlow::CallNode {
+   class RequestVars extends DataFlow::RemoteFlowSource::Range, DataFlow::CallNode {
      RequestVars() { this.getTarget().hasQualifiedName("github.com/gorilla/mux", "Vars") }
    }
 
@@ -102,8 +102,8 @@ Data-flow sinks are specified by queries rather than by library models.
 However, you can use library models to indicate when functions belong to
 special categories. Queries can then use these categories when specifying
 sinks. Classes representing these special categories are contained in
-``ql/src/semmle/go/Concepts.qll`` in the `CodeQL for Go repository
-<https://github.com/github/codeql-go/blob/main/ql/src/semmle/go/Concepts.qll>`__.
+``go/ql/lib/semmle/go/Concepts.qll`` in the `CodeQL repository
+<https://github.com/github/codeql/blob/main/go/ql/lib/semmle/go/Concepts.qll>`__.
 ``Concepts.qll`` includes classes for logger mechanisms,
 HTTP response writers, HTTP redirects, and marshaling and unmarshaling
 functions.

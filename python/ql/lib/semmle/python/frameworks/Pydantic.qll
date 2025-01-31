@@ -11,6 +11,7 @@ private import semmle.python.dataflow.new.DataFlow
 private import semmle.python.dataflow.new.TaintTracking
 private import semmle.python.Concepts
 private import semmle.python.ApiGraphs
+private import semmle.python.frameworks.data.ModelsAsData
 
 /**
  * INTERNAL: Do not use.
@@ -31,6 +32,8 @@ module Pydantic {
     /** Gets a reference to a `pydantic.BaseModel` subclass (a pydantic model). */
     API::Node subclassRef() {
       result = API::moduleImport("pydantic").getMember("BaseModel").getASubclass+()
+      or
+      result = ModelOutput::getATypeNode("pydantic.BaseModel~Subclass").getASubclass*()
     }
 
     /**
@@ -65,7 +68,7 @@ module Pydantic {
      * NOTE: We currently overapproximate, and treat all attributes as containing
      * another pydantic model. For the code below, we _could_ limit this to `main_foo`
      * and members of `other_foos`. IF THIS IS CHANGED, YOU MUST CHANGE THE ADDITIONAL
-     * TAINT STEPS BELOW, SUCH THAT SIMPLE ACCESS OF SOMETHIGN LIKE `str` IS STILL
+     * TAINT STEPS BELOW, SUCH THAT SIMPLE ACCESS OF SOMETHING LIKE `str` IS STILL
      * TAINTED.
      *
      *

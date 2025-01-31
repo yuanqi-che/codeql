@@ -1,5 +1,5 @@
 /**
- * Provides classes for modelling property projection functions.
+ * Provides classes for modeling property projection functions.
  *
  * Subclass `PropertyProjection` to refine the behavior of the analysis on existing property projections.
  * Subclass `CustomPropertyProjection` to introduce new kinds of property projections.
@@ -59,8 +59,6 @@ module PropertyProjection {
   }
 }
 
-deprecated class CustomPropertyProjection = PropertyProjection::Range;
-
 /**
  * Gets a callee of a simple property projection call.
  * This predicate is used exclusively in `SimplePropertyProjection`.
@@ -116,9 +114,9 @@ private class SimplePropertyProjection extends PropertyProjection::Range {
     this = getASimplePropertyProjectionCallee(singleton, selectorIndex, objectIndex).getACall()
   }
 
-  override DataFlow::Node getObject() { result = getArgument(objectIndex) }
+  override DataFlow::Node getObject() { result = this.getArgument(objectIndex) }
 
-  override DataFlow::Node getASelector() { result = getArgument(selectorIndex) }
+  override DataFlow::Node getASelector() { result = this.getArgument(selectorIndex) }
 
   override predicate isSingletonProjection() { singleton = true }
 }
@@ -129,9 +127,9 @@ private class SimplePropertyProjection extends PropertyProjection::Range {
 private class VarArgsPropertyProjection extends PropertyProjection::Range {
   VarArgsPropertyProjection() { this = LodashUnderscore::member("pick").getACall() }
 
-  override DataFlow::Node getObject() { result = getArgument(0) }
+  override DataFlow::Node getObject() { result = this.getArgument(0) }
 
-  override DataFlow::Node getASelector() { result = getArgument(any(int i | i > 0)) }
+  override DataFlow::Node getASelector() { result = this.getArgument(any(int i | i > 0)) }
 
   override predicate isSingletonProjection() { none() }
 }

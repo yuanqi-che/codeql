@@ -1,3 +1,5 @@
+deprecated module;
+
 import csharp
 
 module RequestForgery {
@@ -5,7 +7,7 @@ module RequestForgery {
   import semmle.code.csharp.frameworks.System
   import semmle.code.csharp.frameworks.system.Web
   import semmle.code.csharp.frameworks.Format
-  import semmle.code.csharp.security.dataflow.flowsources.Remote
+  import semmle.code.csharp.security.dataflow.flowsources.FlowSources
 
   /**
    * A data flow source for server side request forgery vulnerabilities.
@@ -18,22 +20,20 @@ module RequestForgery {
   abstract private class Sink extends DataFlow::ExprNode { }
 
   /**
-   * A data flow BarrierGuard which blocks the flow of taint for
+   * A data flow Barrier that blocks the flow of taint for
    * server side request forgery vulnerabilities.
    */
-  abstract private class BarrierGuard extends DataFlow::BarrierGuard { }
+  abstract private class Barrier extends DataFlow::Node { }
 
   /**
    * A data flow configuration for detecting server side request forgery vulnerabilities.
    */
-  class RequestForgeryConfiguration extends DataFlow::Configuration {
-    RequestForgeryConfiguration() { this = "Server Side Request forgery" }
+  private module RequestForgeryFlowConfig implements DataFlow::ConfigSig {
+    predicate isSource(DataFlow::Node source) { source instanceof Source }
 
-    override predicate isSource(DataFlow::Node source) { source instanceof Source }
+    predicate isSink(DataFlow::Node sink) { sink instanceof Sink }
 
-    override predicate isSink(DataFlow::Node sink) { sink instanceof Sink }
-
-    override predicate isAdditionalFlowStep(DataFlow::Node prev, DataFlow::Node succ) {
+    predicate isAdditionalFlowStep(DataFlow::Node prev, DataFlow::Node succ) {
       interpolatedStringFlowStep(prev, succ)
       or
       stringReplaceStep(prev, succ)
@@ -51,18 +51,18 @@ module RequestForgery {
       pathCombineStep(prev, succ)
     }
 
-    override predicate isBarrierGuard(DataFlow::BarrierGuard guard) {
-      guard instanceof BarrierGuard
-    }
+    predicate isBarrier(DataFlow::Node node) { node instanceof Barrier }
   }
 
   /**
-   * A remote data flow source taken as a source
-   * for Server Side Request Forgery(SSRF) Vulnerabilities.
+   * A data flow module for detecting server side request forgery vulnerabilities.
    */
-  private class RemoteFlowSourceAsSource extends Source {
-    RemoteFlowSourceAsSource() { this instanceof RemoteFlowSource }
-  }
+  module RequestForgeryFlow = DataFlow::Global<RequestForgeryFlowConfig>;
+
+  /**
+   * A dataflow source for Server Side Request Forgery(SSRF) Vulnerabilities.
+   */
+  private class ThreatModelSource extends Source instanceof ActiveThreatModelSource { }
 
   /**
    * An url argument to a `HttpRequestMessage` constructor call
@@ -70,7 +70,7 @@ module RequestForgery {
    */
   private class SystemWebHttpRequestMessageSink extends Sink {
     SystemWebHttpRequestMessageSink() {
-      exists(Class c | c.hasQualifiedName("System.Net.Http.HttpRequestMessage") |
+      exists(Class c | c.hasFullyQualifiedName("System.Net.Http", "HttpRequestMessage") |
         c.getAConstructor().getACall().getArgument(1) = this.asExpr()
       )
     }
@@ -83,7 +83,8 @@ module RequestForgery {
   private class SystemNetWebRequestCreateSink extends Sink {
     SystemNetWebRequestCreateSink() {
       exists(Method m |
-        m.getDeclaringType().hasQualifiedName("System.Net.WebRequest") and m.hasName("Create")
+        m.getDeclaringType().hasFullyQualifiedName("System.Net", "WebRequest") and
+        m.hasName("Create")
       |
         m.getACall().getArgument(0) = this.asExpr()
       )
@@ -97,7 +98,7 @@ module RequestForgery {
   private class SystemNetHttpClientSink extends Sink {
     SystemNetHttpClientSink() {
       exists(Method m |
-        m.getDeclaringType().hasQualifiedName("System.Net.Http.HttpClient") and
+        m.getDeclaringType().hasFullyQualifiedName("System.Net.Http", "HttpClient") and
         m.hasName([
             "DeleteAsync", "GetAsync", "GetByteArrayAsync", "GetStreamAsync", "GetStringAsync",
             "PatchAsync", "PostAsync", "PutAsync"
@@ -114,10 +115,13 @@ module RequestForgery {
    */
   private class SystemNetClientBaseAddressSink extends Sink {
     SystemNetClientBaseAddressSink() {
-      exists(Property p |
+      exists(Property p, Type t |
         p.hasName("BaseAddress") and
-        p.getDeclaringType()
-            .hasQualifiedName(["System.Net.WebClient", "System.Net.Http.HttpClient"])
+        t = p.getDeclaringType() and
+        (
+          t.hasFullyQualifiedName("System.Net", "WebClient") or
+          t.hasFullyQualifiedName("System.Net.Http", "HttpClient")
+        )
       |
         p.getAnAssignedValue() = this.asExpr()
       )
@@ -129,17 +133,18 @@ module RequestForgery {
    * to be a guard for Server Side Request Forgery(SSRF) Vulnerabilities.
    * This guard considers all checks as valid.
    */
-  private class BaseUriGuard extends BarrierGuard, MethodCall {
-    BaseUriGuard() { this.getTarget().hasQualifiedName("System.Uri", "IsBaseOf") }
+  private predicate baseUriGuard(Guard g, Expr e, AbstractValue v) {
+    g.(MethodCall).getTarget().hasFullyQualifiedName("System", "Uri", "IsBaseOf") and
+    // we consider any checks against the tainted value to sainitize the taint.
+    // This implies any check such as shown below block the taint flow.
+    // Uri url = new Uri("whitelist.com")
+    // if (url.isBaseOf(`taint1))
+    (e = g.(MethodCall).getArgument(0) or e = g.(MethodCall).getQualifier()) and
+    v.(AbstractValues::BooleanValue).getValue() = true
+  }
 
-    override predicate checks(Expr e, AbstractValue v) {
-      // we consider any checks against the tainted value to sainitize the taint.
-      // This implies any check such as shown below block the taint flow.
-      // Uri url = new Uri("whitelist.com")
-      // if (url.isBaseOf(`taint1))
-      (e = this.getArgument(0) or e = this.getQualifier()) and
-      v.(AbstractValues::BooleanValue).getValue() = true
-    }
+  private class BaseUriBarrier extends Barrier {
+    BaseUriBarrier() { this = DataFlow::BarrierGuard<baseUriGuard/3>::getABarrierNode() }
   }
 
   /**
@@ -147,18 +152,19 @@ module RequestForgery {
    * to be a guard for Server Side Request Forgery(SSRF) Vulnerabilities.
    * This guard considers all checks as valid.
    */
-  private class StringStartsWithBarrierGuard extends BarrierGuard, MethodCall {
-    StringStartsWithBarrierGuard() {
-      this.getTarget().hasQualifiedName("System.String", "StartsWith")
-    }
+  private predicate stringStartsWithGuard(Guard g, Expr e, AbstractValue v) {
+    g.(MethodCall).getTarget().hasFullyQualifiedName("System", "String", "StartsWith") and
+    // Any check such as the ones shown below
+    // "https://myurl.com/".startsWith(`taint`)
+    // `taint`.startsWith("https://myurl.com/")
+    // are assumed to sainitize the taint
+    (e = g.(MethodCall).getQualifier() or g.(MethodCall).getArgument(0) = e) and
+    v.(AbstractValues::BooleanValue).getValue() = true
+  }
 
-    override predicate checks(Expr e, AbstractValue v) {
-      // Any check such as the ones shown below
-      // "https://myurl.com/".startsWith(`taint`)
-      // `taint`.startsWith("https://myurl.com/")
-      // are assumed to sainitize the taint
-      (e = this.getQualifier() or this.getArgument(0) = e) and
-      v.(AbstractValues::BooleanValue).getValue() = true
+  private class StringStartsWithBarrier extends Barrier {
+    StringStartsWithBarrier() {
+      this = DataFlow::BarrierGuard<stringStartsWithGuard/3>::getABarrierNode()
     }
   }
 
@@ -168,7 +174,7 @@ module RequestForgery {
 
   private predicate pathCombineStep(DataFlow::Node prev, DataFlow::Node succ) {
     exists(MethodCall combineCall |
-      combineCall.getTarget().hasQualifiedName("System.IO.Path", "Combine") and
+      combineCall.getTarget().hasFullyQualifiedName("System.IO", "Path", "Combine") and
       combineCall.getArgument(0) = prev.asExpr() and
       combineCall = succ.asExpr()
     )
@@ -176,7 +182,7 @@ module RequestForgery {
 
   private predicate uriCreationStep(DataFlow::Node prev, DataFlow::Node succ) {
     exists(ObjectCreation oc |
-      oc.getTarget().getDeclaringType().hasQualifiedName("System.Uri") and
+      oc.getTarget().getDeclaringType().hasFullyQualifiedName("System", "Uri") and
       oc.getArgument(0) = prev.asExpr() and
       oc = succ.asExpr()
     )
@@ -217,7 +223,7 @@ module RequestForgery {
 
   private predicate formatConvertStep(DataFlow::Node prev, DataFlow::Node succ) {
     exists(Method m |
-      m.hasQualifiedName("System.Convert",
+      m.hasFullyQualifiedName("System", "Convert",
         ["FromBase64String", "FromHexString", "FromBase64CharArray"]) and
       m.getParameter(0) = prev.asParameter() and
       succ.asExpr() = m.getACall()

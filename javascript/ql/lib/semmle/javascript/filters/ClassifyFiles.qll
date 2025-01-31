@@ -61,6 +61,8 @@ predicate isTestFile(File f) {
   )
   or
   f.getAbsolutePath().regexpMatch(".*/__(mocks|tests)__/.*")
+  or
+  f.getBaseName().matches("%.test.%")
 }
 
 /**
@@ -73,7 +75,7 @@ predicate isExternsFile(File f) {
 /**
  * Holds if `f` contains library code.
  */
-predicate isLibaryFile(File f) { f.getATopLevel() instanceof FrameworkLibraryInstance }
+predicate isLibraryFile(File f) { f.getATopLevel() instanceof FrameworkLibraryInstance }
 
 /**
  * Holds if `f` contains template code.
@@ -106,7 +108,7 @@ predicate classify(File f, string category) {
   or
   isExternsFile(f) and category = "externs"
   or
-  isLibaryFile(f) and category = "library"
+  isLibraryFile(f) and category = "library"
   or
   isTemplateFile(f) and category = "template"
 }

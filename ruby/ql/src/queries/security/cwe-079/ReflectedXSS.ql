@@ -13,12 +13,11 @@
  *       external/cwe/cwe-116
  */
 
-import ruby
+import codeql.ruby.AST
 import codeql.ruby.security.ReflectedXSSQuery
-import codeql.ruby.DataFlow
-import DataFlow::PathGraph
+import ReflectedXssFlow::PathGraph
 
-from ReflectedXSS::Configuration config, DataFlow::PathNode source, DataFlow::PathNode sink
-where config.hasFlowPath(source, sink)
-select sink.getNode(), source, sink, "Cross-site scripting vulnerability due to $@.",
-  source.getNode(), "a user-provided value"
+from ReflectedXssFlow::PathNode source, ReflectedXssFlow::PathNode sink
+where ReflectedXssFlow::flowPath(source, sink)
+select sink.getNode(), source, sink, "Cross-site scripting vulnerability due to a $@.",
+  source.getNode(), "user-provided value"
