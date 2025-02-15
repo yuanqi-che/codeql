@@ -4,7 +4,6 @@
 
 import java
 private import semmle.code.java.dataflow.internal.DataFlowUtil
-private import semmle.code.java.dataflow.ExternalFlow
 private import semmle.code.java.dataflow.FlowSummary
 private import semmle.code.java.dataflow.internal.FlowSummaryImpl
 private import FlowTestCaseUtils
@@ -97,12 +96,12 @@ abstract class SupportMethod extends string {
   int getPriority() { result = 50 }
 
   /**
-   * Gets the CSV row describing this support method if it is needed to set up the output for this test.
+   * Gets the data extension row describing this support method if it is needed to set up the output for this test.
    *
-   * For example, `newWithMapValue` will propagate a value from `Argument[0]` to `MapValue of ReturnValue`, and `getMapValue`
+   * For example, `newWithMapValue` will propagate a value from `Argument[0]` to `ReturnValue.MapValue`, and `getMapValue`
    * will do the opposite.
    */
-  string getCsvModel() { none() }
+  string getDataExtensionModel() { none() }
 }
 
 /**
@@ -162,10 +161,11 @@ private class DefaultGetMethod extends GetMethod {
     result = "Object get" + contentToken(c) + "Default(Object container) { return null; }"
   }
 
-  override string getCsvModel() {
+  override string getDataExtensionModel() {
     result =
-      "generatedtest;Test;false;" + this.getName() + ";(Object);;" +
-        getComponentSpec(SummaryComponent::content(c)) + " of Argument[0];ReturnValue;value"
+      "\"generatedtest\", \"Test\", False, \"" + this.getName() +
+        "\", \"(Object)\", \"\", \"Argument[0]." + getComponentSpec(SummaryComponent::content(c)) +
+        "\", \"ReturnValue\", \"value\", \"manual\""
   }
 }
 
@@ -358,10 +358,11 @@ private class DefaultGenMethod extends GenMethod {
     result = "Object newWith" + contentToken(c) + "Default(Object element) { return null; }"
   }
 
-  override string getCsvModel() {
+  override string getDataExtensionModel() {
     result =
-      "generatedtest;Test;false;" + this.getName() + ";(Object);;Argument[0];" +
-        getComponentSpec(SummaryComponent::content(c)) + " of ReturnValue;value"
+      "\"generatedtest\", \"Test\", False, \"" + this.getName() +
+        "\", \"(Object)\", \"\", \"Argument[0]\", \"ReturnValue." +
+        getComponentSpec(SummaryComponent::content(c)) + "\", \"value\", \"manual\""
   }
 }
 
@@ -371,7 +372,7 @@ private class ListGenMethod extends GenMethod {
   override predicate appliesTo(Type t, Content c) {
     exists(GenericType list | list.hasQualifiedName("java.util", "List") |
       t.getErasure() = list.getASourceSupertype*().getErasure() or // cover things like Iterable and Collection
-      list.getAParameterizedType().getASupertype*() = t
+      list.getAParameterizedType().getAnAncestor() = t
     ) and
     c instanceof CollectionContent
   }
@@ -413,7 +414,7 @@ private class StreamGenMethod extends GenMethod {
 
   override predicate appliesTo(Type t, Content c) {
     exists(GenericType op | op.hasQualifiedName("java.util.stream", ["BaseStream", "Stream"]) |
-      op.getAParameterizedType().getASupertype*() = t
+      op.getAParameterizedType().getAnAncestor() = t
     ) and
     c instanceof CollectionContent
   }
@@ -427,7 +428,7 @@ private class OptionalGenMethod extends GenMethod {
 
   override predicate appliesTo(Type t, Content c) {
     exists(GenericType op | op.hasQualifiedName("java.util", "Optional") |
-      op.getAParameterizedType().getASupertype*() = t
+      op.getAParameterizedType().getAnAncestor() = t
     ) and
     c instanceof CollectionContent
   }
@@ -441,7 +442,7 @@ private class MapGenKeyMethod extends GenMethod {
 
   override predicate appliesTo(Type t, Content c) {
     exists(GenericType map | map.hasQualifiedName("java.util", "Map") |
-      map.getAParameterizedType().getASupertype*() = t
+      map.getAParameterizedType().getAnAncestor() = t
     ) and
     c instanceof MapKeyContent
   }
@@ -455,7 +456,7 @@ private class MapEntryGenKeyMethod extends GenMethod {
 
   override predicate appliesTo(Type t, Content c) {
     exists(GenericType map | map.hasQualifiedName("java.util", "Map$Entry") |
-      map.getAParameterizedType().getASupertype*() = t
+      map.getAParameterizedType().getAnAncestor() = t
     ) and
     c instanceof MapKeyContent
   }
@@ -474,7 +475,7 @@ private class MapGenValueMethod extends GenMethod {
 
   override predicate appliesTo(Type t, Content c) {
     exists(GenericType map | map.hasQualifiedName("java.util", "Map") |
-      map.getAParameterizedType().getASupertype*() = t
+      map.getAParameterizedType().getAnAncestor() = t
     ) and
     c instanceof MapValueContent
   }
@@ -488,7 +489,7 @@ private class MapEntryGenValueMethod extends GenMethod {
 
   override predicate appliesTo(Type t, Content c) {
     exists(GenericType map | map.hasQualifiedName("java.util", "Map$Entry") |
-      map.getAParameterizedType().getASupertype*() = t
+      map.getAParameterizedType().getAnAncestor() = t
     ) and
     c instanceof MapValueContent
   }

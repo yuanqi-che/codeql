@@ -16,11 +16,11 @@
 import csharp
 import semmle.code.csharp.security.dataflow.ReDoSQuery
 import semmle.code.csharp.frameworks.system.text.RegularExpressions
-import semmle.code.csharp.dataflow.DataFlow::DataFlow::PathGraph
+import ReDoS::PathGraph
 
-from TaintTrackingConfiguration c, DataFlow::PathNode source, DataFlow::PathNode sink
+from ReDoS::PathNode source, ReDoS::PathNode sink
 where
-  c.hasFlowPath(source, sink) and
+  ReDoS::flowPath(source, sink) and
   // No global timeout set
   not exists(RegexGlobalTimeout r) and
   (
@@ -29,5 +29,5 @@ where
     sink.getNode() instanceof ExponentialRegexSink
   )
 select sink.getNode(), source, sink,
-  "$@ flows to regular expression operation with dangerous regex.", source.getNode(),
-  "User-provided value"
+  "This regex operation with dangerous complexity depends on a $@.", source.getNode(),
+  "user-provided value"

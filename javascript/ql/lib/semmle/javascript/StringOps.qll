@@ -235,12 +235,12 @@ module StringOps {
    */
   class EndsWith extends DataFlow::Node instanceof EndsWith::Range {
     /**
-     * Gets the `A` in `A.startsWith(B)`.
+     * Gets the `A` in `A.endsWith(B)`.
      */
     DataFlow::Node getBaseString() { result = super.getBaseString() }
 
     /**
-     * Gets the `B` in `A.startsWith(B)`.
+     * Gets the `B` in `A.endsWith(B)`.
      */
     DataFlow::Node getSubstring() { result = super.getSubstring() }
 
@@ -512,7 +512,7 @@ module StringOps {
   }
 
   /**
-   * One of the operands in a string concatenation.
+   * An operand in a string concatenation.
    *
    * Examples:
    * ```
@@ -722,7 +722,7 @@ module StringOps {
     }
 
     private class MatchCall extends DataFlow::MethodCallNode {
-      MatchCall() { this.getMethodName() = "match" }
+      MatchCall() { this.getMethodName() = ["match", "matchAll"] }
     }
 
     private class ExecCall extends DataFlow::MethodCallNode {

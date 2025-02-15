@@ -38,9 +38,8 @@ string describeCharacters(string rep) {
  * A local sequence of calls to `String.prototype.replace`,
  * represented by the last call.
  */
-class StringReplaceCallSequence extends DataFlow::CallNode {
+class StringReplaceCallSequence extends DataFlow::CallNode instanceof StringReplaceCall {
   StringReplaceCallSequence() {
-    this instanceof StringReplaceCall and
     not exists(getAStringReplaceMethodCall(this)) // terminal
   }
 
@@ -51,14 +50,14 @@ class StringReplaceCallSequence extends DataFlow::CallNode {
 
   /** Gets a string that is the replacement of this call. */
   string getAReplacementString() {
-    getAMember().replaces(_, result)
+    this.getAMember().replaces(_, result)
     or
     // StringReplaceCall::replaces/2 can't always find the `old` string, so this is added as a fallback.
-    getAMember().getRawReplacement().getStringValue() = result
+    this.getAMember().getRawReplacement().getStringValue() = result
   }
 
   /** Gets a string that is being replaced by this call. */
-  string getAReplacedString() { getAMember().getAReplacedString() = result }
+  string getAReplacedString() { this.getAMember().getAReplacedString() = result }
 }
 
 /**
@@ -75,12 +74,12 @@ private StringReplaceCall getAStringReplaceMethodCall(StringReplaceCall n) {
 module HtmlSanitization {
   private predicate fixedGlobalReplacement(StringReplaceCallSequence chain) {
     forall(StringReplaceCall member | member = chain.getAMember() |
-      member.isGlobal() and member.getArgument(0) instanceof DataFlow::RegExpLiteralNode
+      member.maybeGlobal() and member.getArgument(0) instanceof DataFlow::RegExpCreationNode
     )
   }
 
   /**
-   * Gets a HTML-relevant character that is replaced by `chain`.
+   * Gets an HTML-relevant character that is replaced by `chain`.
    */
   private string getALikelyReplacedCharacter(StringReplaceCallSequence chain) {
     result = "\"" and
@@ -121,39 +120,38 @@ module HtmlSanitization {
   /**
    * An incomplete sanitizer for HTML-relevant characters.
    */
-  class IncompleteSanitizer extends IncompleteBlacklistSanitizer {
-    StringReplaceCallSequence chain;
+  class IncompleteSanitizer extends IncompleteBlacklistSanitizer instanceof StringReplaceCallSequence
+  {
     string unsanitized;
 
     IncompleteSanitizer() {
-      this = chain and
-      fixedGlobalReplacement(chain) and
-      not getALikelyReplacedCharacter(chain) = unsanitized and
+      fixedGlobalReplacement(this) and
+      not getALikelyReplacedCharacter(this) = unsanitized and
       (
         // replaces `<` and `>`
-        getALikelyReplacedCharacter(chain) = "<" and
-        getALikelyReplacedCharacter(chain) = ">" and
+        getALikelyReplacedCharacter(this) = "<" and
+        getALikelyReplacedCharacter(this) = ">" and
         unsanitized = ["\"", "'", "&"]
         or
         // replaces '&' and either `<` or `>`
-        getALikelyReplacedCharacter(chain) = "&" and
+        getALikelyReplacedCharacter(this) = "&" and
         (
-          getALikelyReplacedCharacter(chain) = ">" and
+          getALikelyReplacedCharacter(this) = ">" and
           unsanitized = ">"
           or
-          getALikelyReplacedCharacter(chain) = "<" and
+          getALikelyReplacedCharacter(this) = "<" and
           unsanitized = "<"
         )
       ) and
       // does not replace special characters that the browser doesn't care for
-      not chain.getAReplacedString() = ["!", "#", "*", "?", "@", "|", "~"] and
+      not super.getAReplacedString() = ["!", "#", "*", "?", "@", "|", "~"] and
       /// only replaces explicit characters: exclude character ranges and negated character classes
-      not exists(RegExpTerm t | t = chain.getAMember().getRegExp().getRoot().getAChild*() |
+      not exists(RegExpTerm t | t = super.getAMember().getRegExp().getRoot().getAChild*() |
         t.(RegExpCharacterClass).isInverted() or
         t instanceof RegExpCharacterRange
       ) and
       // the replacements are either empty or HTML entities
-      chain.getAReplacementString().regexpMatch("(?i)(|(&[#a-z0-9]+;))")
+      super.getAReplacementString().regexpMatch("(?i)(|(&[#a-z0-9]+;))")
     }
 
     override string getKind() { result = "HTML" }

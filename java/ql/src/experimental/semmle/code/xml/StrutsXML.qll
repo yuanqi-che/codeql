@@ -1,11 +1,13 @@
+deprecated module;
+
 import java
 
 /**
  * A deployment descriptor file, typically called `struts.xml`.
  */
-class StrutsXMLFile extends XMLFile {
-  StrutsXMLFile() {
-    count(XMLElement e | e = this.getAChild()) = 1 and
+class StrutsXmlFile extends XmlFile {
+  StrutsXmlFile() {
+    count(XmlElement e | e = this.getAChild()) = 1 and
     this.getAChild().getName() = "struts"
   }
 }
@@ -13,8 +15,8 @@ class StrutsXMLFile extends XMLFile {
 /**
  * An XML element in a `StrutsXMLFile`.
  */
-class StrutsXMLElement extends XMLElement {
-  StrutsXMLElement() { this.getFile() instanceof StrutsXMLFile }
+class StrutsXmlElement extends XmlElement {
+  StrutsXmlElement() { this.getFile() instanceof StrutsXmlFile }
 
   /**
    * Gets the value for this element, with leading and trailing whitespace trimmed.
@@ -25,7 +27,7 @@ class StrutsXMLElement extends XMLElement {
 /**
  * A `<constant>` element in a `StrutsXMLFile`.
  */
-class ConstantParameter extends StrutsXMLElement {
+class ConstantParameter extends StrutsXmlElement {
   ConstantParameter() { this.getName() = "constant" }
 
   /**

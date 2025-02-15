@@ -1,5 +1,4 @@
 import codeql.ruby.AST
-import codeql.ruby.ast.Variable
 
 query predicate variableAccess(VariableAccess access, Variable variable, Scope scope) {
   variable = access.getVariable() and
@@ -13,3 +12,5 @@ query predicate explicitWrite(VariableWriteAccess write, AstNode assignment) {
 query predicate implicitWrite(VariableWriteAccess write) { write.isImplicitWrite() }
 
 query predicate readAccess(VariableReadAccess read) { any() }
+
+query predicate captureAccess(LocalVariableAccess access) { access.isCapturedAccess() }

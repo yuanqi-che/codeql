@@ -1,6 +1,7 @@
 private import IR
 import InstructionConsistency // module is below
 import IRTypeConsistency // module is in IRType.qll
+import internal.IRConsistencyImports
 
 module InstructionConsistency {
   private import internal.InstructionImports as Imports
@@ -22,13 +23,13 @@ module InstructionConsistency {
     abstract Language::Location getLocation();
   }
 
-  private class PresentIRFunction extends OptionalIRFunction, TPresentIRFunction {
+  class PresentIRFunction extends OptionalIRFunction, TPresentIRFunction {
     private IRFunction irFunc;
 
     PresentIRFunction() { this = TPresentIRFunction(irFunc) }
 
     override string toString() {
-      result = concat(Language::getIdentityString(irFunc.getFunction()), "; ")
+      result = concat(LanguageDebug::getIdentityString(irFunc.getFunction()), "; ")
     }
 
     override Language::Location getLocation() {
@@ -37,6 +38,8 @@ module InstructionConsistency {
       result =
         min(Language::Location loc | loc = irFunc.getLocation() | loc order by loc.toString())
     }
+
+    IRFunction getIRFunction() { result = irFunc }
   }
 
   private class MissingIRFunction extends OptionalIRFunction, TMissingIRFunction {
@@ -523,5 +526,46 @@ module InstructionConsistency {
       "Call instruction '" + instr.toString() +
         "' has a `this` argument operand that is not an address, in function '$@'." and
     irFunc = getInstructionIRFunction(instr, irFuncText)
+  }
+
+  query predicate nonUniqueIRVariable(
+    Instruction instr, string message, OptionalIRFunction irFunc, string irFuncText
+  ) {
+    exists(VariableInstruction vi, IRVariable v1, IRVariable v2 |
+      instr = vi and vi.getIRVariable() = v1 and vi.getIRVariable() = v2 and v1 != v2
+    ) and
+    message =
+      "Variable instruction '" + instr.toString() +
+        "' has multiple associated variables, in function '$@'." and
+    irFunc = getInstructionIRFunction(instr, irFuncText)
+    or
+    instr.getOpcode() instanceof Opcode::VariableAddress and
+    not instr instanceof VariableInstruction and
+    message =
+      "Variable address instruction '" + instr.toString() +
+        "' has no associated variable, in function '$@'." and
+    irFunc = getInstructionIRFunction(instr, irFuncText)
+  }
+
+  query predicate nonBooleanOperand(
+    Instruction instr, string message, OptionalIRFunction irFunc, string irFuncText
+  ) {
+    exists(Instruction unary |
+      unary = instr.(LogicalNotInstruction).getUnary() and
+      not unary.getResultIRType() instanceof IRBooleanType and
+      irFunc = getInstructionIRFunction(instr, irFuncText) and
+      message =
+        "Logical Not instruction " + instr.toString() +
+          " with non-Boolean operand, in function '$@'."
+    )
+    or
+    exists(Instruction cond |
+      cond = instr.(ConditionalBranchInstruction).getCondition() and
+      not cond.getResultIRType() instanceof IRBooleanType and
+      irFunc = getInstructionIRFunction(instr, irFuncText) and
+      message =
+        "Conditional branch instruction " + instr.toString() +
+          " with non-Boolean condition, in function '$@'."
+    )
   }
 }

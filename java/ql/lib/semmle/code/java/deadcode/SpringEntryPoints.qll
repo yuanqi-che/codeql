@@ -13,7 +13,7 @@ class SpringInjectionCallableEntryPoint extends CallableEntryPoint {
     this instanceof SpringBeanReflectivelyConstructed or
     // A setter method specified in the context.
     this instanceof SpringBeanPropertySetterMethod or
-    exists(this.(SpringBeanXMLAutowiredSetterMethod).getInjectedBean()) or
+    exists(this.(SpringBeanXmlAutowiredSetterMethod).getInjectedBean()) or
     this instanceof SpringBeanAutowiredCallable
   }
 }
@@ -42,17 +42,15 @@ class SpringFactoryMethod extends CallableEntryPoint {
  */
 class SpringBeanAnnotatedMethod extends CallableEntryPoint {
   SpringBeanAnnotatedMethod() {
-    hasAnnotation("org.springframework.context.annotation", "Bean") and
-    getDeclaringType().(SpringComponent).isLive()
+    this.hasAnnotation("org.springframework.context.annotation", "Bean") and
+    this.getDeclaringType().(SpringComponent).isLive()
   }
 }
 
 /**
  * A live entry point within a Spring controller.
  */
-class SpringControllerEntryPoint extends CallableEntryPoint {
-  SpringControllerEntryPoint() { this instanceof SpringControllerMethod }
-}
+class SpringControllerEntryPoint extends CallableEntryPoint instanceof SpringControllerMethod { }
 
 /**
  * A method that is accessible in a response, because it is part of the returned model,
@@ -61,9 +59,9 @@ class SpringControllerEntryPoint extends CallableEntryPoint {
 class SpringResponseAccessibleMethod extends CallableEntryPoint {
   SpringResponseAccessibleMethod() {
     // Must be on a type used in a Model response.
-    getDeclaringType() instanceof SpringModelResponseType and
+    this.getDeclaringType() instanceof SpringModelResponseType and
     // Must be public.
-    isPublic()
+    this.isPublic()
   }
 }
 
@@ -74,10 +72,11 @@ class SpringResponseAccessibleMethod extends CallableEntryPoint {
 class SpringManagedResource extends CallableEntryPoint {
   SpringManagedResource() {
     (
-      hasAnnotation("org.springframework.jmx.export.annotation", "ManagedAttribute") or
-      hasAnnotation("org.springframework.jmx.export.annotation", "ManagedOperation")
+      this.hasAnnotation("org.springframework.jmx.export.annotation", "ManagedAttribute") or
+      this.hasAnnotation("org.springframework.jmx.export.annotation", "ManagedOperation")
     ) and
-    getDeclaringType().hasAnnotation("org.springframework.jmx.export.annotation", "ManagedResource")
+    this.getDeclaringType()
+        .hasAnnotation("org.springframework.jmx.export.annotation", "ManagedResource")
   }
 }
 
@@ -86,31 +85,31 @@ class SpringManagedResource extends CallableEntryPoint {
  */
 class SpringPersistenceConstructor extends CallableEntryPoint {
   SpringPersistenceConstructor() {
-    hasAnnotation("org.springframework.data.annotation", "PersistenceConstructor") and
-    getDeclaringType() instanceof PersistentEntity
+    this.hasAnnotation("org.springframework.data.annotation", "PersistenceConstructor") and
+    this.getDeclaringType() instanceof PersistentEntity
   }
 }
 
 class SpringAspect extends CallableEntryPoint {
   SpringAspect() {
     (
-      hasAnnotation("org.aspectj.lang.annotation", "Around") or
-      hasAnnotation("org.aspectj.lang.annotation", "Before")
+      this.hasAnnotation("org.aspectj.lang.annotation", "Around") or
+      this.hasAnnotation("org.aspectj.lang.annotation", "Before")
     ) and
-    getDeclaringType().hasAnnotation("org.aspectj.lang.annotation", "Aspect")
+    this.getDeclaringType().hasAnnotation("org.aspectj.lang.annotation", "Aspect")
   }
 }
 
 /**
  * Spring Shell provides annotations for identifying methods that contribute CLI commands.
  */
-class SpringCLI extends CallableEntryPoint {
-  SpringCLI() {
+class SpringCli extends CallableEntryPoint {
+  SpringCli() {
     (
-      hasAnnotation("org.springframework.shell.core.annotation", "CliCommand") or
-      hasAnnotation("org.springframework.shell.core.annotation", "CliAvailabilityIndicator")
+      this.hasAnnotation("org.springframework.shell.core.annotation", "CliCommand") or
+      this.hasAnnotation("org.springframework.shell.core.annotation", "CliAvailabilityIndicator")
     ) and
-    getDeclaringType()
+    this.getDeclaringType()
         .getAnAncestor()
         .hasQualifiedName("org.springframework.shell.core", "CommandMarker")
   }

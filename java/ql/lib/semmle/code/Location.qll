@@ -10,9 +10,7 @@ private import semmle.code.SMAP
 
 /** Holds if element `e` has name `name`. */
 predicate hasName(Element e, string name) {
-  classes(e, name, _, _)
-  or
-  interfaces(e, name, _, _)
+  classes_or_interfaces(e, name, _, _)
   or
   primitives(e, name)
   or
@@ -20,7 +18,7 @@ predicate hasName(Element e, string name) {
   or
   methods(e, name, _, _, _, _)
   or
-  fields(e, name, _, _, _)
+  fields(e, name, _, _)
   or
   packages(e, name)
   or
@@ -36,13 +34,19 @@ predicate hasName(Element e, string name) {
   or
   localvars(e, name, _, _)
   or
-  typeVars(e, name, _, _, _)
+  typeVars(e, name, _, _)
   or
   wildcards(e, name, _)
   or
   arrays(e, name, _, _, _)
   or
   modifiers(e, name)
+  or
+  kt_type_alias(e, name, _)
+  or
+  ktProperties(e, name)
+  or
+  e instanceof ErrorType and name = "<CodeQL error type>"
 }
 
 /**
@@ -192,12 +196,26 @@ class Location extends @location {
 }
 
 private predicate hasSourceLocation(Top l, Location loc, File f) {
-  hasLocation(l, loc) and f = loc.getFile() and f.getExtension() = "java"
+  hasLocation(l, loc) and f = loc.getFile() and f.isSourceFile()
 }
 
 cached
 private predicate fixedHasLocation(Top l, Location loc, File f) {
   hasSourceLocation(l, loc, f)
   or
-  hasLocation(l, loc) and not hasSourceLocation(l, _, _) and locations_default(loc, f, _, _, _, _)
+  // When an entity has more than one location, as it might due to
+  // e.g. a parameterized generic being seen and extracted in several
+  // different directories or JAR files, select an arbitrary representative
+  // location to avoid needlessly duplicating alerts.
+  //
+  // Don't do this when the relevant location is in a source file, because
+  // that is much more unusual and we would rather notice the bug than mask it here.
+  loc =
+    min(Location candidateLoc |
+      hasLocation(l, candidateLoc)
+    |
+      candidateLoc order by candidateLoc.getFile().getAbsolutePath()
+    ) and
+  not hasSourceLocation(l, _, _) and
+  locations_default(loc, f, _, _, _, _)
 }

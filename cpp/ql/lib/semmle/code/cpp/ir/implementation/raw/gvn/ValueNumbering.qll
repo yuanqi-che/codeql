@@ -7,17 +7,19 @@ private import internal.ValueNumberingImports
 class ValueNumber extends TValueNumber {
   final string toString() { result = "GVN" }
 
-  final string getDebugString() { result = strictconcat(getAnInstruction().getResultId(), ", ") }
+  final string getDebugString() {
+    result = strictconcat(this.getAnInstruction().getResultId(), ", ")
+  }
 
   final Language::Location getLocation() {
     if
       exists(Instruction i |
-        i = getAnInstruction() and not i.getLocation() instanceof Language::UnknownLocation
+        i = this.getAnInstruction() and not i.getLocation() instanceof Language::UnknownLocation
       )
     then
       result =
         min(Language::Location l |
-          l = getAnInstruction().getLocation() and not l instanceof Language::UnknownLocation
+          l = this.getAnInstruction().getLocation() and not l instanceof Language::UnknownLocation
         |
           l
           order by
@@ -34,13 +36,13 @@ class ValueNumber extends TValueNumber {
   final Instruction getAnInstruction() { this = valueNumber(result) }
 
   /**
-   * Gets one of the instructions that was assigned this value number. The chosen instuction is
+   * Gets one of the instructions that was assigned this value number. The chosen instruction is
    * deterministic but arbitrary. Intended for use only in debugging.
    */
   final Instruction getExampleInstruction() {
     result =
       min(Instruction instr |
-        instr = getAnInstruction()
+        instr = this.getAnInstruction()
       |
         instr order by instr.getBlock().getDisplayIndex(), instr.getDisplayIndexInBlock()
       )
@@ -49,6 +51,7 @@ class ValueNumber extends TValueNumber {
   /**
    * Gets an `Operand` whose definition is exact and has this value number.
    */
+  pragma[nomagic]
   final Operand getAUse() { this = valueNumber(result.getDef()) }
 
   final string getKind() {

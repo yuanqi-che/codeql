@@ -2,7 +2,8 @@
  * A library providing uniform access to various assertion frameworks.
  *
  * Currently supports `org.junit.Assert`, `junit.framework.*`,
- * `com.google.common.base.Preconditions`, and `java.util.Objects`.
+ * `org.junit.jupiter.api.Assertions`, `com.google.common.base.Preconditions`,
+ * and `java.util.Objects`.
  */
 
 import java
@@ -17,7 +18,11 @@ private newtype AssertKind =
 private predicate assertionMethod(Method m, AssertKind kind) {
   exists(RefType junit |
     m.getDeclaringType() = junit and
-    (junit.hasQualifiedName("org.junit", "Assert") or junit.hasQualifiedName("junit.framework", _))
+    (
+      junit.hasQualifiedName("org.junit", "Assert") or
+      junit.hasQualifiedName("junit.framework", _) or
+      junit.hasQualifiedName("org.junit.jupiter.api", "Assertions")
+    )
   |
     m.hasName("assertNotNull") and kind = AssertKindNotNull()
     or
@@ -55,11 +60,11 @@ class AssertionMethod extends Method {
   AssertionMethod() { assertionMethod(this, _) }
 
   /** Gets a call to the assertion method. */
-  MethodAccess getACheck() { result.getMethod().getSourceDeclaration() = this }
+  MethodCall getACheck() { result.getMethod().getSourceDeclaration() = this }
 
   /** Gets a call to the assertion method with `checkedArg` as argument. */
-  MethodAccess getACheck(Expr checkedArg) {
-    result = getACheck() and checkedArg = result.getAnArgument()
+  MethodCall getACheck(Expr checkedArg) {
+    result = this.getACheck() and checkedArg = result.getAnArgument()
   }
 }
 
@@ -104,12 +109,12 @@ predicate assertFail(BasicBlock bb, ControlFlowNode n) {
   bb = n.getBasicBlock() and
   (
     exists(AssertTrueMethod m |
-      n = m.getACheck(any(BooleanLiteral b | b.getBooleanValue() = false))
+      n.asExpr() = m.getACheck(any(BooleanLiteral b | b.getBooleanValue() = false))
     ) or
     exists(AssertFalseMethod m |
-      n = m.getACheck(any(BooleanLiteral b | b.getBooleanValue() = true))
+      n.asExpr() = m.getACheck(any(BooleanLiteral b | b.getBooleanValue() = true))
     ) or
-    exists(AssertFailMethod m | n = m.getACheck()) or
-    n.(AssertStmt).getExpr().(BooleanLiteral).getBooleanValue() = false
+    exists(AssertFailMethod m | n.asExpr() = m.getACheck()) or
+    n.asStmt().(AssertStmt).getExpr().(BooleanLiteral).getBooleanValue() = false
   )
 }

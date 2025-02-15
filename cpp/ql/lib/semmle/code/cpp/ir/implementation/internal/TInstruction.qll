@@ -19,25 +19,35 @@ newtype TInstruction =
   ) {
     IRConstruction::Raw::hasInstruction(tag1, tag2)
   } or
-  TUnaliasedSSAPhiInstruction(
-    TRawInstruction blockStartInstr, UnaliasedSSA::SSA::MemoryLocation memoryLocation
+  TRawUnreachedInstruction(IRFunctionBase irFunc) {
+    IRConstruction::hasUnreachedInstruction(irFunc)
+  } or
+  TUnaliasedSsaPhiInstruction(
+    TRawInstruction blockStartInstr, UnaliasedSsa::Ssa::MemoryLocation memoryLocation
   ) {
-    UnaliasedSSA::SSA::hasPhiInstruction(blockStartInstr, memoryLocation)
+    UnaliasedSsa::Ssa::hasPhiInstruction(blockStartInstr, memoryLocation)
   } or
-  TUnaliasedSSAChiInstruction(TRawInstruction primaryInstruction) { none() } or
-  TUnaliasedSSAUnreachedInstruction(IRFunctionBase irFunc) {
-    UnaliasedSSA::SSA::hasUnreachedInstruction(irFunc)
+  TUnaliasedSsaChiInstruction(TRawInstruction primaryInstruction) { none() } or
+  TUnaliasedSsaUnreachedInstruction(IRFunctionBase irFunc) {
+    UnaliasedSsa::Ssa::hasUnreachedInstruction(irFunc)
   } or
-  TAliasedSSAPhiInstruction(
-    TRawInstruction blockStartInstr, AliasedSSA::SSA::MemoryLocation memoryLocation
+  TUnaliasedSsaUninitializedGroupInstruction(UnaliasedSsa::Ssa::VariableGroup vg) or
+  TAliasedSsaPhiInstruction(
+    TRawInstruction blockStartInstr, AliasedSsa::Ssa::MemoryLocation memoryLocation
   ) {
-    AliasedSSA::SSA::hasPhiInstruction(blockStartInstr, memoryLocation)
+    AliasedSsa::Ssa::hasPhiInstruction(blockStartInstr, memoryLocation)
   } or
-  TAliasedSSAChiInstruction(TRawInstruction primaryInstruction) {
-    AliasedSSA::SSA::hasChiInstruction(primaryInstruction)
+  TAliasedSsaChiInstruction(TRawInstruction primaryInstruction) {
+    AliasedSsa::Ssa::hasChiInstruction(primaryInstruction)
   } or
-  TAliasedSSAUnreachedInstruction(IRFunctionBase irFunc) {
-    AliasedSSA::SSA::hasUnreachedInstruction(irFunc)
+  TAliasedSsaUnreachedInstruction(IRFunctionBase irFunc) {
+    AliasedSsa::Ssa::hasUnreachedInstruction(irFunc)
+  } or
+  TAliasedSsaUninitializedGroupInstruction(AliasedSsa::Ssa::VariableGroup vg) or
+  TAliasedSsaChiAfterUninitializedGroupInstruction(
+    TAliasedSsaUninitializedGroupInstruction initGroup
+  ) {
+    AliasedSsa::Ssa::hasChiNodeAfterUninitializedGroup(initGroup)
   }
 
 /**
@@ -46,28 +56,38 @@ newtype TInstruction =
  * These wrappers are not parameterized because it is not possible to invoke an IPA constructor via
  * a class alias.
  */
-module UnaliasedSSAInstructions {
-  class TPhiInstruction = TUnaliasedSSAPhiInstruction;
+module UnaliasedSsaInstructions {
+  class TPhiInstruction = TUnaliasedSsaPhiInstruction;
 
   TPhiInstruction phiInstruction(
-    TRawInstruction blockStartInstr, UnaliasedSSA::SSA::MemoryLocation memoryLocation
+    TRawInstruction blockStartInstr, UnaliasedSsa::Ssa::MemoryLocation memoryLocation
   ) {
-    result = TUnaliasedSSAPhiInstruction(blockStartInstr, memoryLocation)
+    result = TUnaliasedSsaPhiInstruction(blockStartInstr, memoryLocation)
   }
 
   TRawInstruction reusedPhiInstruction(TRawInstruction blockStartInstr) { none() }
 
-  class TChiInstruction = TUnaliasedSSAChiInstruction;
+  class TChiInstruction = TUnaliasedSsaChiInstruction;
 
-  TChiInstruction chiInstruction(TRawInstruction primaryInstruction) {
-    result = TUnaliasedSSAChiInstruction(primaryInstruction)
+  class TUninitializedGroupInstruction = TUnaliasedSsaUninitializedGroupInstruction;
+
+  class TRawOrUninitializedGroupInstruction = TRawInstruction or TUninitializedGroupInstruction;
+
+  TChiInstruction chiInstruction(TRawOrUninitializedGroupInstruction primaryInstruction) {
+    result = TUnaliasedSsaChiInstruction(primaryInstruction)
   }
 
-  class TUnreachedInstruction = TUnaliasedSSAUnreachedInstruction;
+  class TUnreachedInstruction = TUnaliasedSsaUnreachedInstruction;
 
   TUnreachedInstruction unreachedInstruction(IRFunctionBase irFunc) {
-    result = TUnaliasedSSAUnreachedInstruction(irFunc)
+    result = TUnaliasedSsaUnreachedInstruction(irFunc)
   }
+
+  class VariableGroup = UnaliasedSsa::Ssa::VariableGroup;
+
+  // This really should just be `TUnaliasedSsaUninitializedGroupInstruction`, but that makes the
+  // compiler realize that certain expressions in `SSAConstruction` are unsatisfiable.
+  TRawOrUninitializedGroupInstruction uninitializedGroup(VariableGroup vg) { none() }
 }
 
 /**
@@ -76,28 +96,42 @@ module UnaliasedSSAInstructions {
  * These wrappers are not parameterized because it is not possible to invoke an IPA constructor via
  * a class alias.
  */
-module AliasedSSAInstructions {
-  class TPhiInstruction = TAliasedSSAPhiInstruction or TUnaliasedSSAPhiInstruction;
+module AliasedSsaInstructions {
+  class TPhiInstruction = TAliasedSsaPhiInstruction or TUnaliasedSsaPhiInstruction;
 
   TPhiInstruction phiInstruction(
-    TRawInstruction blockStartInstr, AliasedSSA::SSA::MemoryLocation memoryLocation
+    TRawInstruction blockStartInstr, AliasedSsa::Ssa::MemoryLocation memoryLocation
   ) {
-    result = TAliasedSSAPhiInstruction(blockStartInstr, memoryLocation)
+    result = TAliasedSsaPhiInstruction(blockStartInstr, memoryLocation)
   }
 
   TPhiInstruction reusedPhiInstruction(TRawInstruction blockStartInstr) {
-    result = TUnaliasedSSAPhiInstruction(blockStartInstr, _)
+    result = TUnaliasedSsaPhiInstruction(blockStartInstr, _)
   }
 
-  class TChiInstruction = TAliasedSSAChiInstruction;
+  class TChiInstruction =
+    TAliasedSsaChiInstruction or TAliasedSsaChiAfterUninitializedGroupInstruction;
 
-  TChiInstruction chiInstruction(TRawInstruction primaryInstruction) {
-    result = TAliasedSSAChiInstruction(primaryInstruction)
+  class TRawOrInitialzieGroupInstruction =
+    TRawInstruction or TAliasedSsaUninitializedGroupInstruction;
+
+  TChiInstruction chiInstruction(TRawOrInitialzieGroupInstruction primaryInstruction) {
+    result = TAliasedSsaChiInstruction(primaryInstruction)
+    or
+    result = TAliasedSsaChiAfterUninitializedGroupInstruction(primaryInstruction)
   }
 
-  class TUnreachedInstruction = TAliasedSSAUnreachedInstruction;
+  class TUnreachedInstruction = TAliasedSsaUnreachedInstruction;
 
   TUnreachedInstruction unreachedInstruction(IRFunctionBase irFunc) {
-    result = TAliasedSSAUnreachedInstruction(irFunc)
+    result = TAliasedSsaUnreachedInstruction(irFunc)
+  }
+
+  class VariableGroup = AliasedSsa::Ssa::VariableGroup;
+
+  class TUninitializedGroupInstruction = TAliasedSsaUninitializedGroupInstruction;
+
+  TUninitializedGroupInstruction uninitializedGroup(VariableGroup vg) {
+    result = TAliasedSsaUninitializedGroupInstruction(vg)
   }
 }

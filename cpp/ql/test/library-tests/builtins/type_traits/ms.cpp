@@ -1,4 +1,4 @@
-
+// semmle-extractor-options: --microsoft --microsoft_version 1600
 class empty {
 };
 
@@ -254,5 +254,37 @@ void f(void) {
 
     bool b_is_final1 = __is_final(a_struct);
     bool b_is_final2 = __is_final(a_final_struct);
-}
 
+    bool b_is_assignable1 = __is_assignable(a_struct,a_struct);
+    bool b_is_assignable2 = __is_assignable(a_struct,empty);
+    bool b_is_assignable3 = __is_assignable(a_struct,int);
+
+    bool b_is_aggregate1 = __is_aggregate(a_struct);
+    bool b_is_aggregate2 = __is_aggregate(int);
+
+    bool b_has_unique_object_representations1 = __has_unique_object_representations(int);
+    bool b_has_unique_object_representations2 = __has_unique_object_representations(float);
+
+    bool b_is_layout_compatible1 = __is_layout_compatible(int, long);
+    bool b_is_layout_compatible2 = __is_layout_compatible(int*, int* const);
+
+    bool b_is_pointer_interconvertible_base_of1 = __is_pointer_interconvertible_base_of(empty, empty);
+    bool b_is_pointer_interconvertible_base_of2 = __is_pointer_interconvertible_base_of(empty, abstract);
+
+    bool b_is_trivially_copy_assignable1 = __is_trivially_copy_assignable(has_assign);
+    bool b_is_trivially_copy_assignable2 = __is_trivially_copy_assignable(int);
+
+    bool b_is_assignable_no_precondition_check1 = __is_assignable_no_precondition_check(a_struct, a_struct);
+    bool b_is_assignable_no_precondition_check2 = __is_assignable_no_precondition_check(a_struct, empty);
+    bool b_is_assignable_no_precondition_check3 = __is_assignable_no_precondition_check(a_struct, int);
+
+    bool b_is_pointer_interconvertible_with_class1 = __is_pointer_interconvertible_with_class(a_struct, &a_struct::i);
+    bool b_is_pointer_interconvertible_with_class2 = __is_pointer_interconvertible_with_class(a_struct, &a_struct::d);
+
+    bool b_is_corresponding_member1 = __is_corresponding_member(a_struct, a_struct, &a_struct::i, &a_struct::i);
+    bool b_is_corresponding_member2 = __is_corresponding_member(a_struct, a_struct, &a_struct::i, &a_struct::d);
+
+    bool b_is_valid_winrt_type = __is_valid_winrt_type(int);
+    bool b_is_win_class = __is_win_class(int);
+    bool b_is_win_interface = __is_win_interface(int);
+}

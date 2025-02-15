@@ -15,10 +15,10 @@
 import java
 import semmle.code.java.security.Mail
 
-from MethodAccess ma
+from MethodCall ma
 where
   ma.getMethod() instanceof MailSessionGetInstanceMethod and
   isInsecureMailPropertyConfig(ma.getArgument(0).(VarAccess).getVariable())
   or
   enablesEmailSsl(ma) and not hasSslCertificateCheck(ma.getQualifier().(VarAccess).getVariable())
-select ma, "Java mailing has insecure SSL configuration"
+select ma, "Java mailing has insecure SSL configuration."

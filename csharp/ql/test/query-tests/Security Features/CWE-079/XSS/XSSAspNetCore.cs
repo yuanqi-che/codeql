@@ -18,7 +18,8 @@ namespace Testing.Controllers
         {
             // BAD: flow of content type to.
             var v = new ViewResult();
-            v.ViewData["BadData"] = new HtmlString(Request.Query["Bad data"]);
+            var source = Request.Query["Bad data"]; // $ Source=req1
+            v.ViewData["BadData"] = new HtmlString(source); // $ Alert=req1
 
             StringValues vOut;
             Request.Query.TryGetValue("Foo", out vOut);
@@ -37,28 +38,31 @@ namespace Testing.Controllers
 
         [HttpPost("Test")]
         [ValidateAntiForgeryToken]
-        public IActionResult Submit([FromQuery] string foo)
+        public IActionResult Submit([FromQuery] string foo) // $ Source=foo
         {
             var view = new ViewResult();
             //BAD: flow of submitted value to view in HtmlString.
-            view.ViewData["FOO"] = new HtmlString(foo);
+            view.ViewData["FOO"] = new HtmlString(foo); // $ Alert=foo
             return view;
         }
 
         public IActionResult IndexToModel()
         {
             //BAD: flow of submitted value to view in HtmlString.
-            HtmlString v = new HtmlString(Request.QueryString.Value);
+            var req2 = Request.QueryString.Value; // $ Source=req2
+            HtmlString v = new HtmlString(req2); // $ Alert=req2
             return View(new HomeViewModel() { Message = "Message from Index", Description = v });
         }
 
         public IActionResult About()
         {
             //BAD: flow of submitted value to view in HtmlString.
-            HtmlString v = new HtmlString(Request.Query["Foo"].ToString());
+            var req3 = Request.Query["Foo"].ToString(); // $ Source=req3
+            HtmlString v = new HtmlString(req3); // $ Alert=req3
 
             //BAD: flow of submitted value to view in HtmlString.
-            HtmlString v1 = new HtmlString(Request.Query["Foo"][0]);
+            var req4 = Request.Query["Foo"][0]; // $ Source=req4
+            HtmlString v1 = new HtmlString(req4); // $ Alert=req4
 
             return View(new HomeViewModel() { Message = "Message from About", Description = v });
         }
@@ -66,14 +70,14 @@ namespace Testing.Controllers
         public IActionResult Contact()
         {
             //BAD: flow of user content type to view in HtmlString.
-            HtmlString v = new HtmlString(Request.ContentType);
+            var ct = Request.ContentType; // $ Source=ct
+            HtmlString v = new HtmlString(ct); // $ Alert=ct
 
             //BAD: flow of headers to view in HtmlString.
-            HtmlString v1 = new HtmlString(value: Request.Headers["Foo"]);
+            var header = Request.Headers["Foo"]; // $ Source=header
+            HtmlString v1 = new HtmlString(value: header); // $ Alert=header
 
             return View(new HomeViewModel() { Message = "Message from Contact", Description = v });
         }
     }
 }
-
-// initial-extractor-options: /r:netstandard.dll /r:${testdir}/../../../../../packages/Microsoft.AspNetCore.Mvc.1.1.3/lib/net451/Microsoft.AspNetCore.Mvc.dll /r:${testdir}/../../../../../packages/Microsoft.AspNetCore.Mvc.Core.1.1.3/lib/net451/Microsoft.AspNetCore.Mvc.Core.dll /r:${testdir}/../../../../../packages/Microsoft.AspNetCore.Antiforgery.1.1.2/lib/net451/Microsoft.AspNetCore.Antiforgery.dll /r:${testdir}/../../../../../packages/Microsoft.AspNetCore.Mvc.ViewFeatures.1.1.3/lib/net451/Microsoft.AspNetCore.Mvc.ViewFeatures.dll  /r:${testdir}/../../../../../packages/Microsoft.AspNetCore.Mvc.Abstractions.1.1.3/lib/net451/Microsoft.AspNetCore.Mvc.Abstractions.dll /r:${testdir}/../../../../../packages\Microsoft.AspNetCore.Http.Abstractions.1.1.2\lib\net451\Microsoft.AspNetCore.Http.Abstractions.dll /r:${testdir}/../../../../../packages/Microsoft.AspNetCore.Html.Abstractions.1.1.2/lib/netstandard1.0/Microsoft.AspNetCore.Html.Abstractions.dll /r:${testdir}/../../../../../packages/Microsoft.AspNetCore.Http.Features.1.1.2\lib\net451\Microsoft.AspNetCore.Http.Features.dll /r:${testdir}/../../../../../packages\Microsoft.Extensions.Primitives.2.1.0\lib\netstandard2.0\Microsoft.Extensions.Primitives.dll /r:System.Linq.dll /r:System.Linq.Expressions.dll /r:System.Linq.Queryable.dll

@@ -3,7 +3,7 @@
 import java
 
 /** A call to a string to number conversion. */
-private class SpecialMethodAccess extends MethodAccess {
+private class SpecialMethodCall extends MethodCall {
   predicate isValueOfMethod(string klass) {
     this.getMethod().getName() = "valueOf" and
     this.getQualifier().getType().(RefType).hasQualifiedName("java.lang", klass) and
@@ -15,7 +15,7 @@ private class SpecialMethodAccess extends MethodAccess {
     this.getQualifier().getType().(RefType).hasQualifiedName("java.lang", klass)
   }
 
-  predicate throwsNFE() {
+  predicate throwsNfe() {
     this.isParseMethod("Byte", "parseByte") or
     this.isParseMethod("Short", "parseShort") or
     this.isParseMethod("Integer", "parseInt") or
@@ -43,7 +43,7 @@ private class SpecialClassInstanceExpr extends ClassInstanceExpr {
     this.getNumArgument() = 1
   }
 
-  predicate throwsNFE() {
+  predicate throwsNfe() {
     this.isStringConstructor("Byte") or
     this.isStringConstructor("Short") or
     this.isStringConstructor("Integer") or
@@ -59,15 +59,15 @@ class NumberFormatException extends RefType {
 }
 
 /** Holds if `java.lang.NumberFormatException` is caught. */
-predicate catchesNFE(TryStmt t) {
+predicate catchesNfe(TryStmt t) {
   exists(CatchClause cc, LocalVariableDeclExpr v |
     t.getACatchClause() = cc and
     cc.getVariable() = v and
-    v.getType().(RefType).getASubtype*() instanceof NumberFormatException
+    v.getType().(RefType).getADescendant() instanceof NumberFormatException
   )
 }
 
 /** Holds if `java.lang.NumberFormatException` can be thrown. */
-predicate throwsNFE(Expr e) {
-  e.(SpecialClassInstanceExpr).throwsNFE() or e.(SpecialMethodAccess).throwsNFE()
+predicate throwsNfe(Expr e) {
+  e.(SpecialClassInstanceExpr).throwsNfe() or e.(SpecialMethodCall).throwsNfe()
 }

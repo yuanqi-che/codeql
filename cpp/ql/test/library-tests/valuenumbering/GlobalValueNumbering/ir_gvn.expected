@@ -69,6 +69,23 @@ test.cpp:
 #    1|     v1_10(void)                = AliasedUse              : m1_3
 #    1|     v1_11(void)                = ExitFunction            : 
 
+#   10| int global01
+#   10|   Block 0
+#   10|     v10_1(void)       = EnterFunction             : 
+#   10|     m10_2(unknown)    = AliasedDefinition         : 
+#   10|         valnum = unique
+#   10|     r10_3(glval<int>) = VariableAddress[global01] : 
+#   10|         valnum = unique
+#   10|     r10_4(int)        = Constant[1]               : 
+#   10|         valnum = m10_5, r10_4
+#   10|     m10_5(int)        = Store[global01]           : &:r10_3, r10_4
+#   10|         valnum = m10_5, r10_4
+#   10|     m10_6(unknown)    = Chi                       : total:m10_2, partial:m10_5
+#   10|         valnum = unique
+#   10|     v10_7(void)       = ReturnVoid                : 
+#   10|     v10_8(void)       = AliasedUse                : ~m10_6
+#   10|     v10_9(void)       = ExitFunction              : 
+
 #   12| void test01(int, int)
 #   12|   Block 0
 #   12|     v12_1(void)                 = EnterFunction             : 
@@ -150,6 +167,23 @@ test.cpp:
 #   12|     v12_9(void)                 = ReturnVoid                : 
 #   12|     v12_10(void)                = AliasedUse                : m12_3
 #   12|     v12_11(void)                = ExitFunction              : 
+
+#   21| int global02
+#   21|   Block 0
+#   21|     v21_1(void)       = EnterFunction             : 
+#   21|     m21_2(unknown)    = AliasedDefinition         : 
+#   21|         valnum = unique
+#   21|     r21_3(glval<int>) = VariableAddress[global02] : 
+#   21|         valnum = unique
+#   21|     r21_4(int)        = Constant[2]               : 
+#   21|         valnum = m21_5, r21_4
+#   21|     m21_5(int)        = Store[global02]           : &:r21_3, r21_4
+#   21|         valnum = m21_5, r21_4
+#   21|     m21_6(unknown)    = Chi                       : total:m21_2, partial:m21_5
+#   21|         valnum = unique
+#   21|     v21_7(void)       = ReturnVoid                : 
+#   21|     v21_8(void)       = AliasedUse                : ~m21_6
+#   21|     v21_9(void)       = ExitFunction              : 
 
 #   25| void test02(int, int)
 #   25|   Block 0
@@ -239,6 +273,23 @@ test.cpp:
 #   25|     v25_9(void)                 = ReturnVoid                       : 
 #   25|     v25_10(void)                = AliasedUse                       : ~m30_4
 #   25|     v25_11(void)                = ExitFunction                     : 
+
+#   35| int global03
+#   35|   Block 0
+#   35|     v35_1(void)       = EnterFunction             : 
+#   35|     m35_2(unknown)    = AliasedDefinition         : 
+#   35|         valnum = unique
+#   35|     r35_3(glval<int>) = VariableAddress[global03] : 
+#   35|         valnum = unique
+#   35|     r35_4(int)        = Constant[3]               : 
+#   35|         valnum = m35_5, r35_4
+#   35|     m35_5(int)        = Store[global03]           : &:r35_3, r35_4
+#   35|         valnum = m35_5, r35_4
+#   35|     m35_6(unknown)    = Chi                       : total:m35_2, partial:m35_5
+#   35|         valnum = unique
+#   35|     v35_7(void)       = ReturnVoid                : 
+#   35|     v35_8(void)       = AliasedUse                : ~m35_6
+#   35|     v35_9(void)       = ExitFunction              : 
 
 #   39| void test03(int, int, int*)
 #   39|   Block 0
@@ -417,7 +468,7 @@ test.cpp:
 #   56|         valnum = r50_1, r55_3, r56_12, r56_19, r56_2, r59_1
 #   56|     r56_3(char *)        = Load[ptr]            : &:r56_2, m56_1
 #   56|         valnum = m56_1, r56_13, r56_20, r56_3, r59_2
-#   56|     r56_4(char)          = Load[?]              : &:r56_3, ~m49_4
+#   56|     r56_4(char)          = Load[?]              : &:r56_3, ~m49_12
 #   56|         valnum = r56_14, r56_4, r59_3
 #   56|     r56_5(int)           = Convert              : r56_4
 #   56|         valnum = r56_15, r56_5, r59_4
@@ -440,7 +491,7 @@ test.cpp:
 #   56|         valnum = r50_1, r55_3, r56_12, r56_19, r56_2, r59_1
 #   56|     r56_13(char *)        = Load[ptr]            : &:r56_12, m56_1
 #   56|         valnum = m56_1, r56_13, r56_20, r56_3, r59_2
-#   56|     r56_14(char)          = Load[?]              : &:r56_13, ~m49_4
+#   56|     r56_14(char)          = Load[?]              : &:r56_13, ~m49_12
 #   56|         valnum = r56_14, r56_4, r59_3
 #   56|     r56_15(int)           = Convert              : r56_14
 #   56|         valnum = r56_15, r56_5, r59_4
@@ -470,7 +521,7 @@ test.cpp:
 #   59|         valnum = r50_1, r55_3, r56_12, r56_19, r56_2, r59_1
 #   59|     r59_2(char *)        = Load[ptr]            : &:r59_1, m56_1
 #   59|         valnum = m56_1, r56_13, r56_20, r56_3, r59_2
-#   59|     r59_3(char)          = Load[?]              : &:r59_2, ~m49_4
+#   59|     r59_3(char)          = Load[?]              : &:r59_2, ~m49_12
 #   59|         valnum = r56_14, r56_4, r59_3
 #   59|     r59_4(int)           = Convert              : r59_3
 #   59|         valnum = r56_15, r56_5, r59_4
@@ -705,7 +756,7 @@ test.cpp:
 #   92|         valnum = r92_1, r92_3, r93_2
 #   92|     m92_4(int)        = Store[x]                 : &:r92_3, r92_2
 #   92|         valnum = m92_4, m92_6, m93_4, r92_2, r92_5, r93_3
-#   92|     r92_5(int)        = CopyValue                : r92_2
+#   92|     r92_5(int)        = Load[x]                  : &:r92_3, m92_4
 #   92|         valnum = m92_4, m92_6, m93_4, r92_2, r92_5, r93_3
 #   92|     m92_6(int)        = Store[x]                 : &:r92_1, r92_5
 #   92|         valnum = m92_4, m92_6, m93_4, r92_2, r92_5, r93_3

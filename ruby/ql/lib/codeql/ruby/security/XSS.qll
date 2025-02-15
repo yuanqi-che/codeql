@@ -2,14 +2,14 @@
  * Provides classes and predicates used by the XSS queries.
  */
 
-private import ruby
+private import codeql.ruby.AST
 private import codeql.ruby.DataFlow
-private import codeql.ruby.DataFlow2
 private import codeql.ruby.CFG
 private import codeql.ruby.Concepts
 private import codeql.ruby.Frameworks
 private import codeql.ruby.frameworks.ActionController
 private import codeql.ruby.frameworks.ActionView
+private import codeql.ruby.frameworks.Rails
 private import codeql.ruby.dataflow.RemoteFlowSources
 private import codeql.ruby.dataflow.BarrierGuards
 private import codeql.ruby.dataflow.internal.DataFlowDispatch
@@ -35,11 +35,6 @@ private module Shared {
    */
   abstract class Sanitizer extends DataFlow::Node { }
 
-  /**
-   * A sanitizer guard for "server-side cross-site scripting" vulnerabilities.
-   */
-  abstract class SanitizerGuard extends DataFlow::BarrierGuard { }
-
   private class ErbOutputMethodCallArgumentNode extends DataFlow::Node {
     private MethodCall call;
 
@@ -54,15 +49,24 @@ private module Shared {
   }
 
   /**
+   * A value interpolated using a raw erb output directive, which does not perform HTML escaping.
+   * ```erb
+   * <%== sink %>
+   * ```
+   */
+  class ErbRawOutputDirective extends Sink {
+    ErbRawOutputDirective() {
+      exists(ErbOutputDirective d | d.isRaw() | this.asExpr().getExpr() = d.getTerminalStmt())
+    }
+  }
+
+  /**
    * An `html_safe` call marking the output as not requiring HTML escaping,
    * considered as a flow sink.
    */
   class HtmlSafeCallAsSink extends Sink {
     HtmlSafeCallAsSink() {
-      exists(HtmlSafeCall c, ErbOutputDirective d |
-        this.asExpr().getExpr() = c.getReceiver() and
-        c = d.getTerminalStmt()
-      )
+      this = any(DataFlow::CallNode call | call.getMethodName() = "html_safe").getReceiver()
     }
   }
 
@@ -74,12 +78,43 @@ private module Shared {
   }
 
   /**
+   * An argument to an ActionView helper method which is not escaped,
+   * considered as a flow sink.
+   */
+  class RawHelperCallArgumentAsSink extends Sink {
+    RawHelperCallArgumentAsSink() {
+      exists(ErbOutputDirective d, ActionView::Helpers::RawHelperCall c |
+        d.getTerminalStmt() = c and this.asExpr().getExpr() = c.getRawArgument()
+      )
+    }
+  }
+
+  /**
+   * An argument that is used to construct the `src` attribute of a `<script>`
+   * tag.
+   */
+  class ArgumentInterpretedAsUrlAsSink extends Sink, ErbOutputMethodCallArgumentNode,
+    ActionView::ArgumentInterpretedAsUrl
+  { }
+
+  /**
    * A argument to a call to the `link_to` method, which does not expect
    * unsanitized user-input, considered as a flow sink.
    */
   class LinkToCallArgumentAsSink extends Sink, ErbOutputMethodCallArgumentNode {
     LinkToCallArgumentAsSink() {
       this.asExpr().getExpr() = this.getCall().(LinkToCall).getPathArgument()
+    }
+  }
+
+  /** A write to an HTTP response header, considered as a flow sink. */
+  class HeaderWriteAsSink extends Sink {
+    HeaderWriteAsSink() {
+      exists(Http::Server::HeaderWriteAccess a |
+        a.getName() = ["content-type", "access-control-allow-origin"]
+      |
+        this = a.getValue()
+      )
     }
   }
 
@@ -93,19 +128,21 @@ private module Shared {
   /**
    * A comparison with a constant string, considered as a sanitizer-guard.
    */
-  class StringConstCompareAsSanitizerGuard extends SanitizerGuard, StringConstCompare { }
+  class StringConstCompareAsSanitizer extends Sanitizer, StringConstCompareBarrier { }
 
   /**
    * An inclusion check against an array of constant strings, considered as a sanitizer-guard.
    */
-  class StringConstArrayInclusionCallAsSanitizerGuard extends SanitizerGuard,
-    StringConstArrayInclusionCall { }
+  class StringConstArrayInclusionCallAsSanitizer extends Sanitizer,
+    StringConstArrayInclusionCallBarrier
+  { }
 
   /**
    * A `VariableWriteAccessCfgNode` that is not succeeded (locally) by another
    * write to that variable.
    */
-  private class FinalInstanceVarWrite extends CfgNodes::ExprNodes::InstanceVariableWriteAccessCfgNode {
+  private class FinalInstanceVarWrite extends CfgNodes::ExprNodes::InstanceVariableWriteAccessCfgNode
+  {
     private InstanceVariable var;
 
     FinalInstanceVarWrite() {
@@ -133,47 +170,6 @@ private module Shared {
   }
 
   /**
-   * Holds if some render call passes `value` for `hashKey` in the `locals`
-   * argument, in ERB file `erb`.
-   */
-  pragma[noinline]
-  private predicate renderCallLocals(string hashKey, Expr value, ErbFile erb) {
-    exists(RenderCall call, Pair kvPair |
-      call.getLocals().getAKeyValuePair() = kvPair and
-      kvPair.getValue() = value and
-      kvPair.getKey().getValueText() = hashKey and
-      call.getTemplateFile() = erb
-    )
-  }
-
-  pragma[noinline]
-  private predicate isFlowFromLocals0(
-    CfgNodes::ExprNodes::ElementReferenceCfgNode refNode, string hashKey, ErbFile erb
-  ) {
-    exists(DataFlow::Node argNode, CfgNodes::ExprNodes::StringlikeLiteralCfgNode strNode |
-      argNode.asExpr() = refNode.getArgument(0) and
-      refNode.getReceiver().getExpr().(MethodCall).getMethodName() = "local_assigns" and
-      argNode.getALocalSource() = DataFlow::exprNode(strNode) and
-      strNode.getExpr().getValueText() = hashKey and
-      erb = refNode.getFile()
-    )
-  }
-
-  private predicate isFlowFromLocals(DataFlow::Node node1, DataFlow::Node node2) {
-    exists(string hashKey, ErbFile erb |
-      // node1 is a `locals` argument to a render call...
-      renderCallLocals(hashKey, node1.asExpr().getExpr(), erb)
-    |
-      // node2 is an element reference against `local_assigns`
-      isFlowFromLocals0(node2.asExpr(), hashKey, erb)
-      or
-      // ...node2 is a "method call" to a "method" with `hashKey` as its name
-      // TODO: This may be a variable read in reality that we interpret as a method call
-      isMethodCall(node2.asExpr().getExpr(), hashKey, erb)
-    )
-  }
-
-  /**
    * Holds if `action` contains an assignment of `value` to an instance
    * variable named `name`, in ERB file `erb`.
    */
@@ -198,9 +194,9 @@ private module Shared {
 
   private predicate isFlowFromControllerInstanceVariable(DataFlow::Node node1, DataFlow::Node node2) {
     // instance variables in the controller
-    exists(ActionControllerActionMethod action, string name, ErbFile template |
+    exists(string name, ErbFile template |
       // match read to write on variable name
-      actionAssigns(action, name, node1.asExpr().getExpr(), template) and
+      actionAssigns(_, name, node1.asExpr().getExpr(), template) and
       // propagate taint from assignment RHS expr to variable read access in view
       isVariableReadAccess(node2.asExpr().getExpr(), name, template)
     )
@@ -245,14 +241,25 @@ private module Shared {
   /**
    * An additional step that is preserves dataflow in the context of XSS.
    */
-  predicate isAdditionalXSSFlowStep(DataFlow::Node node1, DataFlow::Node node2) {
-    isFlowFromLocals(node1, node2)
-    or
+  predicate isAdditionalXssFlowStep(DataFlow::Node node1, DataFlow::Node node2) {
     isFlowFromControllerInstanceVariable(node1, node2)
     or
     isFlowIntoHelperMethod(node1, node2)
     or
     isFlowFromHelperMethod(node1, node2)
+  }
+
+  private predicate htmlSafeGuard(CfgNodes::AstCfgNode guard, CfgNode testedNode, boolean branch) {
+    exists(DataFlow::CallNode html_safe_call | html_safe_call.getMethodName() = "html_safe?" |
+      guard = html_safe_call.asExpr() and
+      testedNode = html_safe_call.getReceiver().asExpr() and
+      branch = true
+    )
+  }
+
+  /** A guard that calls `.html_safe?` to check whether the string is already HTML-safe. */
+  private class HtmlSafeGuard extends Sanitizer {
+    HtmlSafeGuard() { this = DataFlow::BarrierGuard<htmlSafeGuard/3>::getABarrierNode() }
   }
 }
 
@@ -261,7 +268,7 @@ private module Shared {
  * "reflected cross-site scripting" vulnerabilities, as well as
  * extension points for adding your own.
  */
-module ReflectedXSS {
+module ReflectedXss {
   /** A data flow source for stored XSS vulnerabilities. */
   abstract class Source extends Shared::Source { }
 
@@ -271,45 +278,49 @@ module ReflectedXSS {
   /** A sanitizer for stored XSS vulnerabilities. */
   class Sanitizer = Shared::Sanitizer;
 
-  /** A sanitizer guard for stored XSS vulnerabilities. */
-  class SanitizerGuard = Shared::SanitizerGuard;
-
   /**
    * An additional step that is preserves dataflow in the context of reflected XSS.
    */
-  predicate isAdditionalXSSTaintStep = Shared::isAdditionalXSSFlowStep/2;
+  predicate isAdditionalXssTaintStep = Shared::isAdditionalXssFlowStep/2;
 
   /**
-   * A source of remote user input, considered as a flow source.
+   * A HTTP request input, considered as a flow source.
    */
-  class RemoteFlowSourceAsSource extends Source, RemoteFlowSource { }
+  class HttpRequestInputAccessAsSource extends Source, Http::Server::RequestInputAccess {
+    HttpRequestInputAccessAsSource() { this.isThirdPartyControllable() }
+  }
 }
 
 private module OrmTracking {
   /**
    * A data flow configuration to track flow from finder calls to field accesses.
    */
-  class Configuration extends DataFlow2::Configuration {
-    Configuration() { this = "OrmTracking" }
-
-    override predicate isSource(DataFlow2::Node source) { source instanceof OrmInstantiation }
-
-    // Select any call node and narrow down later
-    override predicate isSink(DataFlow2::Node sink) { sink instanceof DataFlow2::CallNode }
-
-    override predicate isAdditionalFlowStep(DataFlow2::Node node1, DataFlow2::Node node2) {
-      Shared::isAdditionalXSSFlowStep(node1, node2)
-      or
-      // Propagate flow through arbitrary method calls
-      node2.(DataFlow2::CallNode).getReceiver() = node1
-      or
-      // Propagate flow through "or" expressions `or`/`||`
-      node2.asExpr().getExpr().(LogicalOrExpr).getAnOperand() = node1.asExpr().getExpr()
+  private module Config implements DataFlow::ConfigSig {
+    predicate isSource(DataFlow::Node source) {
+      // We currently only use ORM instances that come from a call site, so restrict the sources
+      // to calls. This works around a performance issue that would arise from using 'self' as a source
+      // in ActiveRecord models. Over time, library models should stop relying on OrmInstantiation and instead
+      // use API graphs or type-tracking the same way we track other types.
+      source instanceof OrmInstantiation and source instanceof DataFlow::CallNode
     }
+
+    // Select any call receiver and narrow down later
+    predicate isSink(DataFlow::Node sink) { sink = any(DataFlow::CallNode c).getReceiver() }
+
+    predicate isAdditionalFlowStep(DataFlow::Node node1, DataFlow::Node node2) {
+      Shared::isAdditionalXssFlowStep(node1, node2)
+    }
+
+    predicate isBarrierIn(DataFlow::Node node) { node instanceof DataFlow::SelfParameterNode }
+
+    int accessPathLimit() { result = 1 }
   }
+
+  import DataFlow::Global<Config>
 }
 
-module StoredXSS {
+/** Provides default sources, sinks and sanitizers for detecting stored cross-site scripting (XSS) vulnerabilities. */
+module StoredXss {
   /** A data flow source for stored XSS vulnerabilities. */
   abstract class Source extends Shared::Source { }
 
@@ -319,20 +330,18 @@ module StoredXSS {
   /** A sanitizer for stored XSS vulnerabilities. */
   class Sanitizer = Shared::Sanitizer;
 
-  /** A sanitizer guard for stored XSS vulnerabilities. */
-  class SanitizerGuard = Shared::SanitizerGuard;
-
   /**
    * An additional step that preserves dataflow in the context of stored XSS.
    */
-  predicate isAdditionalXSSTaintStep = Shared::isAdditionalXSSFlowStep/2;
+  predicate isAdditionalXssTaintStep = Shared::isAdditionalXssFlowStep/2;
 
-  private class OrmFieldAsSource extends Source instanceof DataFlow2::CallNode {
+  private class OrmFieldAsSource extends Source instanceof DataFlow::CallNode {
     OrmFieldAsSource() {
-      exists(OrmTracking::Configuration subConfig, DataFlow2::CallNode subSrc, MethodCall call |
-        subConfig.hasFlow(subSrc, this) and
-        call = this.asExpr().getExpr() and
-        subSrc.(OrmInstantiation).methodCallMayAccessField(call.getMethodName())
+      exists(DataFlow::CallNode subSrc |
+        OrmTracking::flow(subSrc, this.getReceiver()) and
+        subSrc.(OrmInstantiation).methodCallMayAccessField(this.getMethodName()) and
+        this.getNumberOfArguments() = 0 and
+        not exists(this.getBlock())
       )
     }
   }

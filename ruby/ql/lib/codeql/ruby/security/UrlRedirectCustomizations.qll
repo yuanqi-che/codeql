@@ -4,12 +4,14 @@
  * own.
  */
 
-private import ruby
+private import codeql.ruby.AST
 private import codeql.ruby.DataFlow
 private import codeql.ruby.Concepts
 private import codeql.ruby.dataflow.RemoteFlowSources
 private import codeql.ruby.dataflow.BarrierGuards
 private import codeql.ruby.dataflow.Sanitizers
+private import codeql.ruby.frameworks.ActionController
+private import codeql.ruby.frameworks.data.internal.ApiGraphModels
 
 /**
  * Provides default sources, sinks and sanitizers for detecting
@@ -33,11 +35,6 @@ module UrlRedirect {
   abstract class Sanitizer extends DataFlow::Node { }
 
   /**
-   * A sanitizer guard for "URL redirection" vulnerabilities.
-   */
-  abstract class SanitizerGuard extends DataFlow::BarrierGuard { }
-
-  /**
    * Additional taint steps for "URL redirection" vulnerabilities.
    */
   predicate isAdditionalTaintStep(DataFlow::Node node1, DataFlow::Node node2) {
@@ -47,30 +44,50 @@ module UrlRedirect {
   /**
    * A source of remote user input, considered as a flow source.
    */
-  class RemoteFlowSourceAsSource extends Source, RemoteFlowSource { }
+  class HttpRequestInputAccessAsSource extends Source, Http::Server::RequestInputAccess {
+    HttpRequestInputAccessAsSource() { this.isThirdPartyControllable() }
+  }
 
   /**
    * A HTTP redirect response, considered as a flow sink.
    */
   class RedirectLocationAsSink extends Sink {
     RedirectLocationAsSink() {
-      exists(HTTP::Server::HttpRedirectResponse e |
+      exists(Http::Server::HttpRedirectResponse e, MethodBase method |
         this = e.getRedirectLocation() and
-        // As a rough heuristic, assume that methods with these names are handlers for POST/PUT/PATCH/DELETE requests,
-        // which are not as vulnerable to URL redirection because browsers will not initiate them from clicking a link.
-        not this.asExpr()
-            .getExpr()
-            .getEnclosingMethod()
-            .getName()
-            .regexpMatch(".*(create|update|destroy).*")
+        // We only want handlers for GET requests.
+        // Handlers for other HTTP methods are not as vulnerable to URL
+        // redirection as browsers will not initiate them from clicking a link.
+        method = this.asExpr().getExpr().getEnclosingMethod() and
+        (
+          // If there's a Rails GET route to this handler, we can be certain that it is a candidate.
+          method.(ActionControllerActionMethod).getARoute().getHttpMethod() = "get"
+          or
+          // Otherwise, we have to rely on a heuristic to filter out invulnerable handlers.
+          // We exclude any handlers with names containing create/update/destroy, as these are not likely to handle GET requests.
+          not exists(method.(ActionControllerActionMethod).getARoute()) and
+          not method.getName().regexpMatch(".*(create|update|destroy).*")
+        ) and
+        // If this redirect is an ActionController method call, it is only vulnerable if it allows external redirects.
+        forall(RedirectToCall c | c = e.asExpr().getExpr() | c.allowsExternalRedirect())
       )
     }
+  }
+
+  private class ExternalUrlRedirectSink extends Sink {
+    ExternalUrlRedirectSink() { this = ModelOutput::getASinkNode("url-redirection").asSink() }
   }
 
   /**
    * A comparison with a constant string, considered as a sanitizer-guard.
    */
-  class StringConstCompareAsSanitizerGuard extends SanitizerGuard, StringConstCompare { }
+  class StringConstCompareAsSanitizer extends Sanitizer, StringConstCompareBarrier { }
+
+  /**
+   * A string concatenation against a constant list, considered as a sanitizer-guard.
+   */
+  class StringConstArrayInclusionAsSanitizer extends Sanitizer, StringConstArrayInclusionCallBarrier
+  { }
 
   /**
    * Some methods will propagate taint to their return values.

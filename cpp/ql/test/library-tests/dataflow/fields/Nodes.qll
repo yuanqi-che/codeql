@@ -3,7 +3,7 @@ private import semmle.code.cpp.dataflow.DataFlow as AST
 private import cpp
 
 private newtype TNode =
-  TASTNode(AST::DataFlow::Node n) or
+  TAstNode(AST::DataFlow::Node n) or
   TIRNode(IR::DataFlow::Node n)
 
 class Node extends TNode {
@@ -11,19 +11,19 @@ class Node extends TNode {
 
   IR::DataFlow::Node asIR() { none() }
 
-  AST::DataFlow::Node asAST() { none() }
+  AST::DataFlow::Node asAst() { none() }
 
   Location getLocation() { none() }
 }
 
-class ASTNode extends Node, TASTNode {
+class AstNode extends Node, TAstNode {
   AST::DataFlow::Node n;
 
-  ASTNode() { this = TASTNode(n) }
+  AstNode() { this = TAstNode(n) }
 
   override string toString() { result = n.toString() }
 
-  override AST::DataFlow::Node asAST() { result = n }
+  override AST::DataFlow::Node asAst() { result = n }
 
   override Location getLocation() { result = n.getLocation() }
 }

@@ -1,5 +1,4 @@
 private import cpp as Cpp
-private import semmle.code.cpp.Print as Print
 private import IRUtilities
 private import semmle.code.cpp.ir.implementation.IRType
 private import semmle.code.cpp.ir.implementation.raw.internal.IRConstruction as IRConstruction
@@ -48,7 +47,9 @@ class Variable = Cpp::Variable;
 
 class AutomaticVariable = Cpp::StackVariable;
 
-class StaticVariable = Cpp::Variable;
+class StaticVariable = Cpp::StaticStorageDurationVariable;
+
+class GlobalVariable = Cpp::GlobalOrNamespaceVariable;
 
 class Parameter = Cpp::Parameter;
 
@@ -56,16 +57,14 @@ class Field = Cpp::Field;
 
 class BuiltInOperation = Cpp::BuiltInOperation;
 
+class Declaration = Cpp::Declaration;
+
 // TODO: Remove necessity for these.
 class Expr = Cpp::Expr;
 
 class Class = Cpp::Class; // Used for inheritance conversions
 
-predicate getIdentityString = Print::getIdentityString/1;
-
-predicate hasCaseEdge(string minValue, string maxValue) {
-  exists(Cpp::SwitchCase switchCase | hasCaseEdge(switchCase, minValue, maxValue))
-}
+predicate hasCaseEdge(string minValue, string maxValue) { hasCaseEdge(_, minValue, maxValue) }
 
 predicate hasPositionalArgIndex(int argIndex) {
   exists(Cpp::FunctionCall call | exists(call.getArgument(argIndex))) or

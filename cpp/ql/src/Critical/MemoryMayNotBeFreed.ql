@@ -39,7 +39,7 @@ predicate allocCallOrIndirect(Expr e) {
       allocCallOrIndirect(rtn.getExpr())
       or
       // return variable assigned with alloc
-      exists(Variable v |
+      exists(StackVariable v |
         v = rtn.getExpr().(VariableAccess).getTarget() and
         allocCallOrIndirect(v.getAnAssignedValue()) and
         not assignedToFieldOrGlobal(v, _)
@@ -63,7 +63,7 @@ predicate verifiedRealloc(FunctionCall reallocCall, Variable v, ControlFlowNode 
       node.(AnalysedExpr).getNonNullSuccessor(newV) = verified and
       // note: this case uses naive flow logic (getAnAssignedValue).
       // special case: if the result of the 'realloc' is assigned to the
-      // same variable, we don't descriminate properly between the old
+      // same variable, we don't discriminate properly between the old
       // and the new allocation; better to not consider this a free at
       // all in that case.
       newV != v
@@ -144,7 +144,7 @@ class AllocReachability extends StackVariableReachabilityExt {
   override predicate isBarrier(
     ControlFlowNode source, ControlFlowNode node, ControlFlowNode next, StackVariable v
   ) {
-    isSource(source, v) and
+    this.isSource(source, v) and
     next = node.getASuccessor() and
     // the memory (stored in any variable `v0`) allocated at `source` is freed or
     // assigned to a global at node, or NULL checked on the edge node -> next.
@@ -190,4 +190,4 @@ where
     allocatedVariableReaches(v, def, ret) and
     ret.getAChild*() = v.getAnAccess()
   )
-select def, "The memory allocated here may not be released at $@.", ret, "this exit point"
+select def, "This memory allocation may not be released at $@.", ret, "this exit point"

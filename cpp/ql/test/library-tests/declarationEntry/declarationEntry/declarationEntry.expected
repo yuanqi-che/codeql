@@ -15,10 +15,6 @@
 | declarationEntry.cpp:20:6:20:11 | myEnum | declarationEntry.cpp:18:6:18:11 | declaration of myEnum | 1 | 1 |
 | declarationEntry.cpp:20:6:20:11 | myEnum | declarationEntry.cpp:20:6:20:11 | definition of myEnum | 1 | 1 |
 | declarationEntry.cpp:27:20:27:20 | T | declarationEntry.cpp:27:20:27:20 | definition of T | 1 | 1 |
-| declarationEntry.cpp:28:7:28:7 | operator= | declarationEntry.cpp:28:7:28:7 | declaration of operator= | 1 | 1 |
-| declarationEntry.cpp:28:7:28:7 | operator= | declarationEntry.cpp:28:7:28:7 | declaration of operator= | 1 | 1 |
-| declarationEntry.cpp:28:7:28:7 | operator= | declarationEntry.cpp:28:7:28:7 | declaration of operator= | 1 | 1 |
-| declarationEntry.cpp:28:7:28:7 | operator= | declarationEntry.cpp:28:7:28:7 | declaration of operator= | 1 | 1 |
 | declarationEntry.cpp:28:7:28:21 | myTemplateClass<T> | declarationEntry.cpp:28:7:28:21 | definition of myTemplateClass<T> | 1 | 1 |
 | declarationEntry.cpp:28:7:28:21 | myTemplateClass<int> | declarationEntry.cpp:28:7:28:21 | definition of myTemplateClass<T> | 1 | 0 |
 | declarationEntry.cpp:28:7:28:21 | myTemplateClass<short> | declarationEntry.cpp:28:7:28:21 | definition of myTemplateClass<T> | 1 | 0 |
@@ -27,5 +23,11 @@
 | declarationEntry.cpp:31:4:31:19 | myMemberVariable | declarationEntry.cpp:31:4:31:19 | definition of myMemberVariable | 1 | 1 |
 | declarationEntry.cpp:34:22:34:28 | mtc_int | declarationEntry.cpp:34:22:34:28 | definition of mtc_int | 1 | 1 |
 | declarationEntry.cpp:35:24:35:32 | mtc_short | declarationEntry.cpp:35:24:35:32 | definition of mtc_short | 1 | 1 |
+| declarationEntry.cpp:39:7:39:7 | operator= | declarationEntry.cpp:39:7:39:7 | declaration of operator= | 1 | 1 |
+| declarationEntry.cpp:39:7:39:7 | operator= | declarationEntry.cpp:39:7:39:7 | declaration of operator= | 1 | 1 |
+| declarationEntry.cpp:39:7:39:13 | myClass | declarationEntry.cpp:39:7:39:13 | definition of myClass | 1 | 1 |
+| declarationEntry.cpp:39:7:39:13 | myClass | forwardDeclaration.cpp:1:7:1:13 | declaration of myClass | 1 | 1 |
+| declarationEntry.cpp:42:6:42:21 | myMemberVariable | declarationEntry.cpp:42:6:42:21 | definition of myMemberVariable | 1 | 1 |
+| forwardDeclaration.cpp:3:10:3:19 | myClassPtr | forwardDeclaration.cpp:3:10:3:19 | definition of myClassPtr | 1 | 1 |
 | macro.c:2:1:2:3 | foo | macro.c:2:1:2:3 | declaration of foo | 1 | 1 |
 | macro.c:4:5:4:8 | main | macro.c:4:5:4:8 | definition of main | 1 | 1 |

@@ -1,6 +1,7 @@
 import python
 private import semmle.python.pointsto.PointsTo
 private import semmle.python.objects.ObjectInternal
+private import semmle.python.internal.CachedStages
 
 /** An expression */
 class Expr extends Expr_, AstNode {
@@ -8,7 +9,11 @@ class Expr extends Expr_, AstNode {
   override Scope getScope() { py_scopes(this, result) }
 
   /** Gets a textual representation of this element. */
-  override string toString() { result = "Expression" }
+  cached
+  override string toString() {
+    Stages::AST::ref() and
+    result = "Expression"
+  }
 
   /** Gets the module in which this expression occurs */
   Module getEnclosingModule() { result = this.getScope().getEnclosingModule() }
@@ -30,9 +35,6 @@ class Expr extends Expr_, AstNode {
   /** Whether this expression is a constant */
   predicate isConstant() { not this.isVariable() }
 
-  /** Use isParenthesized instead. */
-  deprecated override predicate isParenthesised() { this.isParenthesized() }
-
   /** Whether the parenthesized property of this expression is true. */
   predicate isParenthesized() { Expr_.super.isParenthesised() }
 
@@ -48,9 +50,6 @@ class Expr extends Expr_, AstNode {
 
   /** Gets an immediate (non-nested) sub-expression of this expression */
   Expr getASubExpression() { none() }
-
-  /** Use StrConst.getText() instead */
-  deprecated string strValue() { none() }
 
   override AstNode getAChildNode() { result = this.getASubExpression() }
 
@@ -190,7 +189,16 @@ class Call extends Call_ {
    */
   Keyword getKeyword(int index) {
     result = this.getNamedArg(index) and
-    not exists(DictUnpacking d, int lower | d = this.getNamedArg(lower) and lower < index)
+    (
+      not exists(this.getMinimumUnpackingIndex())
+      or
+      index <= this.getMinimumUnpackingIndex()
+    )
+  }
+
+  /** Gets the minimum index (if any) at which a dictionary unpacking (`**foo`) occurs in this call. */
+  private int getMinimumUnpackingIndex() {
+    result = min(int i | this.getNamedArg(i) instanceof DictUnpacking)
   }
 
   /**
@@ -228,7 +236,7 @@ class Call extends Call_ {
   string getANamedArgumentName() {
     result = this.getAKeyword().getArg()
     or
-    result = this.getKwargs().(Dict).getAKey().(StrConst).getText()
+    result = this.getKwargs().(Dict).getAKey().(StringLiteral).getText()
   }
 
   /** Gets the positional argument count of this call, provided there is no more than one tuple (*) argument. */
@@ -237,10 +245,12 @@ class Call extends Call_ {
     result = count(Expr arg | arg = this.getAPositionalArg() and not arg instanceof Starred)
   }
 
-  /** Gets the tuple (*) argument of this call, provided there is exactly one. */
+  /** Gets the first tuple (*) argument of this call, if any. */
   Expr getStarArg() {
-    count(this.getStarargs()) < 2 and
-    result = this.getStarargs()
+    exists(int firstStarArgIndex |
+      firstStarArgIndex = min(int i | this.getPositionalArg(i) instanceof Starred | i) and
+      result = this.getPositionalArg(firstStarArgIndex).(Starred).getValue()
+    )
   }
 }
 
@@ -289,7 +299,7 @@ class Repr extends Repr_ {
  * A bytes constant, such as `b'ascii'`. Note that unadorned string constants such as
  * `"hello"` are treated as Bytes for Python2, but Unicode for Python3.
  */
-class Bytes extends StrConst {
+class Bytes extends StringLiteral {
   /* syntax: b"hello" */
   Bytes() { not this.isUnicode() }
 
@@ -315,7 +325,7 @@ class Ellipsis extends Ellipsis_ {
 }
 
 /**
- * Immutable literal expressions (except tuples).
+ * An immutable literal expression (except tuples).
  * Consists of string (both unicode and byte) literals and numeric literals.
  */
 abstract class ImmutableLiteral extends Expr {
@@ -436,7 +446,7 @@ class NegativeIntegerLiteral extends ImmutableLiteral, UnaryExpr {
  * A unicode string expression, such as `u"\u20ac"`. Note that unadorned string constants such as
  * "hello" are treated as Bytes for Python2, but Unicode for Python3.
  */
-class Unicode extends StrConst {
+class Unicode extends StringLiteral {
   /* syntax: "hello" */
   Unicode() { this.isUnicode() }
 
@@ -446,6 +456,8 @@ class Unicode extends StrConst {
   }
 
   /**
+   * Gets the quoted representation fo this string.
+   *
    * The extractor puts quotes into the name of each string (to prevent "0" clashing with 0).
    * The following predicate help us match up a string/byte literals in the source
    * which the equivalent object.
@@ -587,7 +599,7 @@ class Slice extends Slice_ {
 /**
  * Returns all string prefixes in the database that are explicitly marked as Unicode strings.
  *
- * Helper predicate for `StrConst::isUnicode`.
+ * Helper predicate for `StringLiteral::isUnicode`.
  */
 pragma[nomagic]
 private string unicode_prefix() {
@@ -598,7 +610,7 @@ private string unicode_prefix() {
 /**
  * Returns all string prefixes in the database that are _not_ explicitly marked as bytestrings.
  *
- * Helper predicate for `StrConst::isUnicode`.
+ * Helper predicate for `StringLiteral::isUnicode`.
  */
 pragma[nomagic]
 private string non_byte_prefix() {
@@ -606,9 +618,19 @@ private string non_byte_prefix() {
   not result.charAt(_) in ["b", "B"]
 }
 
+/** DEPRECATED. Use `StringLiteral` instead. */
+deprecated class Str = StringLiteral;
+
+/** DEPRECATED. Use `StringLiteral` instead. */
+deprecated class StrConst = StringLiteral;
+
 /** A string constant. */
-class StrConst extends Str_, ImmutableLiteral {
+class StringLiteral extends Str_, ImmutableLiteral {
   /* syntax: "hello" */
+  /**
+   * Holds if this string is a unicode string, either by default (e.g. if Python 3), or with an
+   * explicit prefix.
+   */
   predicate isUnicode() {
     this.getPrefix() = unicode_prefix()
     or
@@ -619,8 +641,6 @@ class StrConst extends Str_, ImmutableLiteral {
       this.getEnclosingModule().hasFromFuture("unicode_literals")
     )
   }
-
-  deprecated override string strValue() { result = this.getS() }
 
   override Expr getASubExpression() { none() }
 
@@ -639,6 +659,8 @@ class StrConst extends Str_, ImmutableLiteral {
   }
 
   override Object getLiteralObject() { none() }
+
+  override string toString() { result = "StringLiteral" }
 }
 
 private predicate name_consts(Name_ n, string id) {
@@ -685,7 +707,7 @@ class False extends BooleanLiteral {
   override boolean booleanValue() { result = false }
 }
 
-/** `None` */
+/** The `None` constant. */
 class None extends NameConstant {
   /* syntax: None */
   None() { name_consts(this, "None") }
@@ -718,24 +740,30 @@ class FormattedValue extends FormattedValue_ {
   }
 }
 
+/** A guard in a case statement */
+class Guard extends Guard_ {
+  /* syntax: if Expr */
+  override Expr getASubExpression() { result = this.getTest() }
+}
+
 /* Expression Contexts */
 /** A context in which an expression used */
 class ExprContext extends ExprContext_ { }
 
-/** Load context, the context of var in len(var) */
+/** The load context, the context of var in len(var) */
 class Load extends Load_ { }
 
-/** Store context, the context of var in var = 0 */
+/** The store context, the context of var in var = 0 */
 class Store extends Store_ { }
 
-/** Delete context, the context of var in del var */
+/** The delete context, the context of var in del var */
 class Del extends Del_ { }
 
-/** This is an artifact of the Python grammar which includes an AugLoad context, even though it is never used. */
-library class AugLoad extends AugLoad_ { }
+/** The context of an augmented load. This is an artifact of the Python grammar which includes an AugLoad context, even though it is never used. */
+class AugLoad extends AugLoad_ { }
 
-/** Augmented store context, the context of var in var += 1 */
+/** The augmented store context, the context of var in var += 1 */
 class AugStore extends AugStore_ { }
 
-/** Parameter context, the context of var in def f(var): pass */
+/** The parameter context, the context of var in def f(var): pass */
 class Param extends Param_ { }

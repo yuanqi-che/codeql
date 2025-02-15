@@ -16,14 +16,14 @@
 import CloseType
 
 predicate readerType(RefType t) {
-  exists(RefType sup | sup = t.getASupertype*() |
+  exists(RefType sup | sup = t.getAnAncestor() |
     sup.hasQualifiedName("java.io", ["Reader", "InputStream"]) or
     sup.hasQualifiedName("java.util.zip", "ZipFile")
   )
 }
 
 predicate safeReaderType(RefType t) {
-  exists(RefType sup | sup = t.getASupertype*() |
+  exists(RefType sup | sup = t.getAnAncestor() |
     sup.hasQualifiedName("java.io", ["CharArrayReader", "StringReader", "ByteArrayInputStream"])
     or
     // Note: It is unclear which specific class this is supposed to match
@@ -33,6 +33,7 @@ predicate safeReaderType(RefType t) {
 
 from ClassInstanceExpr cie, RefType t
 where
+  cie.getFile().isJavaSourceFile() and
   badCloseableInit(cie) and
   cie.getType() = t and
   readerType(t) and

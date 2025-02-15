@@ -14,7 +14,12 @@ module ZipSlip {
    */
   abstract class Source extends DataFlow::Node {
     /** Gets a flow label denoting the type of value for which this is a source. */
-    TaintedPath::Label::PosixPath getAFlowLabel() { result.isRelative() }
+    TaintedPath::FlowState::PosixPath getAFlowState() { result.isRelative() }
+
+    /** DEPRECATED. Use `getAFlowState()` instead. */
+    deprecated TaintedPath::Label::PosixPath getAFlowLabel() {
+      result = this.getAFlowState().toFlowLabel()
+    }
   }
 
   /**
@@ -22,7 +27,12 @@ module ZipSlip {
    */
   abstract class Sink extends DataFlow::Node {
     /** Gets a flow label denoting the type of value for which this is a sink. */
-    TaintedPath::Label::PosixPath getAFlowLabel() { any() }
+    TaintedPath::FlowState::PosixPath getAFlowState() { any() }
+
+    /** DEPRECATED. Use `getAFlowState()` instead. */
+    deprecated TaintedPath::Label::PosixPath getAFlowLabel() {
+      result = this.getAFlowState().toFlowLabel()
+    }
   }
 
   /**
@@ -94,6 +104,29 @@ module ZipSlip {
           )
         )
       )
+    }
+  }
+
+  private import semmle.javascript.DynamicPropertyAccess as DynamicPropertyAccess
+
+  /** A object key in the JSZip files object */
+  class JSZipFilesSource extends Source instanceof DynamicPropertyAccess::EnumeratedPropName {
+    JSZipFilesSource() {
+      super.getSourceObject() =
+        API::moduleImport("jszip").getInstance().getMember("files").asSource()
+    }
+  }
+
+  /** A relative path from iterating the files in the JSZip object */
+  class JSZipFileSource extends Source {
+    JSZipFileSource() {
+      this =
+        API::moduleImport("jszip")
+            .getInstance()
+            .getMember(["forEach", "filter"])
+            .getParameter(0)
+            .getParameter(0)
+            .asSource()
     }
   }
 

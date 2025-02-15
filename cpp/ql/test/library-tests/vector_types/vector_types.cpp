@@ -1,6 +1,6 @@
+// semmle-extractor-options: --clang --clang_version 30801
 // Compilable with: clang --std=c++0x -msse4.1 vector_types.cpp
 // (some bits also compilable with gcc)
-
 int printf(...);
 
 typedef float v4f __attribute__((vector_size(16)));

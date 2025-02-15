@@ -89,6 +89,18 @@ module CallGraph {
       result = getAFunctionReference(outer, 0, t.continue()).getAnInvocation() and
       locallyReturnedFunction(outer, function)
     )
+    or
+    // dynamic dispatch to unknown property of an object
+    exists(DataFlow::ObjectLiteralNode obj, DataFlow::PropRead read |
+      getAFunctionReference(function, 0, t.continue()) = obj.getAPropertySource() and
+      obj.getAPropertyRead() = read and
+      not exists(read.getPropertyName()) and
+      result = read and
+      // there exists only local reads of the object, nothing else.
+      forex(DataFlow::Node ref | ref = obj.getALocalUse() and exists(ref.asExpr()) |
+        ref = [obj, any(DataFlow::PropRead r).getBase()]
+      )
+    )
   }
 
   private predicate locallyReturnedFunction(
@@ -190,41 +202,64 @@ module CallGraph {
   }
 
   /**
+   * Holds if `write` installs an accessor on an object. Such property writes should not
+   * be considered calls to an accessor.
+   */
+  pragma[nomagic]
+  private predicate isAccessorInstallation(DataFlow::PropWrite write) {
+    exists(write.getInstalledAccessor(_))
+  }
+
+  /**
    * Gets a getter or setter invoked as a result of the given property access.
    */
   cached
   DataFlow::FunctionNode getAnAccessorCallee(DataFlow::PropRef ref) {
-    exists(DataFlow::ClassNode cls, string name |
-      ref = cls.getAnInstanceMemberAccess(name) and
-      result = cls.getInstanceMember(name, DataFlow::MemberKind::getter())
+    not isAccessorInstallation(ref) and
+    (
+      exists(DataFlow::ClassNode cls, string name |
+        ref = cls.getAnInstanceMemberAccess(name) and
+        result = cls.getInstanceMember(name, DataFlow::MemberKind::getter())
+        or
+        ref = getAnInstanceMemberAssignment(cls, name) and
+        result = cls.getInstanceMember(name, DataFlow::MemberKind::setter())
+        or
+        ref = cls.getAClassReference().getAPropertyRead(name) and
+        result = cls.getStaticMember(name, DataFlow::MemberKind::getter())
+        or
+        ref = cls.getAClassReference().getAPropertyWrite(name) and
+        result = cls.getStaticMember(name, DataFlow::MemberKind::setter())
+      )
       or
-      ref = getAnInstanceMemberAssignment(cls, name) and
-      result = cls.getInstanceMember(name, DataFlow::MemberKind::setter())
+      exists(DataFlow::ObjectLiteralNode object, string name |
+        ref = getAnAllocationSiteRef(object).getAPropertyRead(name) and
+        result = object.getPropertyGetter(name)
+        or
+        ref = getAnAllocationSiteRef(object).getAPropertyWrite(name) and
+        result = object.getPropertySetter(name)
+      )
     )
-    or
-    exists(DataFlow::ObjectLiteralNode object, string name |
-      ref = getAnAllocationSiteRef(object).getAPropertyRead(name) and
-      result = object.getPropertyGetter(name)
+  }
+
+  private DataFlow::FunctionNode getAMethodOnObject(DataFlow::SourceNode node) {
+    (
+      result = node.getAPropertySource()
       or
-      ref = getAnAllocationSiteRef(object).getAPropertyWrite(name) and
-      result = object.getPropertySetter(name)
+      result = node.(DataFlow::ObjectLiteralNode).getPropertyGetter(_)
+      or
+      result = node.(DataFlow::ObjectLiteralNode).getPropertySetter(_)
+    ) and
+    not node.getTopLevel().isExterns() and
+    // Ignore writes to `this` inside a constructor, since this is already handled by instance method tracking
+    not exists(DataFlow::ClassNode cls |
+      node = cls.getConstructor().getReceiver()
+      or
+      node = cls.(DataFlow::ClassNode::FunctionStyleClass).getAPrototypeReference()
     )
   }
 
   private predicate shouldTrackObjectWithMethods(DataFlow::SourceNode node) {
-    (
-      (
-        node instanceof DataFlow::ObjectLiteralNode
-        or
-        node instanceof DataFlow::FunctionNode
-      ) and
-      node.getAPropertySource() instanceof DataFlow::FunctionNode
-      or
-      exists(node.(DataFlow::ObjectLiteralNode).getPropertyGetter(_))
-      or
-      exists(node.(DataFlow::ObjectLiteralNode).getPropertySetter(_))
-    ) and
-    not node.getTopLevel().isExterns()
+    exists(getAMethodOnObject(node))
   }
 
   /**
@@ -242,5 +277,46 @@ module CallGraph {
     result = node
     or
     StepSummary::step(getAnAllocationSiteRef(node), result, objectWithMethodsStep())
+  }
+
+  /**
+   * Holds if `function` flows to a property of `host` via non-local data flow.
+   */
+  pragma[nomagic]
+  private predicate complexMethodInstallation(
+    DataFlow::SourceNode host, DataFlow::FunctionNode function
+  ) {
+    not function = getAMethodOnObject(_) and
+    exists(DataFlow::TypeTracker t |
+      getAFunctionReference(function, 0, t) = host.getAPropertySource() and
+      t.start() // require call bit to be false
+    )
+  }
+
+  /**
+   * Holds if `pred` is assumed to flow to `succ` because a method is stored on an object that is assumed
+   * to be the receiver of calls to that method.
+   *
+   * For example, object literal below is assumed to flow to the receiver of the `foo` function:
+   * ```js
+   * let obj = {};
+   * obj.foo = function() {}
+   * ```
+   */
+  cached
+  predicate impliedReceiverStep(DataFlow::SourceNode pred, DataFlow::SourceNode succ) {
+    // To avoid double-recursion, we handle either complex flow for the host object, or for the function, but not both.
+    exists(DataFlow::SourceNode host |
+      // Complex flow for the host object
+      pred = getAnAllocationSiteRef(host) and
+      succ = getAMethodOnObject(host).getReceiver()
+      or
+      // Complex flow for the function
+      exists(DataFlow::FunctionNode function |
+        complexMethodInstallation(host, function) and
+        pred = host and
+        succ = function.getReceiver()
+      )
+    )
   }
 }

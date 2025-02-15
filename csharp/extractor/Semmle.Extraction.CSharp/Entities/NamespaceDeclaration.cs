@@ -1,19 +1,18 @@
 
+using System.IO;
+using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Semmle.Extraction.Entities;
-using System.IO;
-using System.Linq;
 
 namespace Semmle.Extraction.CSharp.Entities
 {
-    internal class NamespaceDeclaration : CachedEntity<NamespaceDeclarationSyntax>
+    internal class NamespaceDeclaration : CachedEntity<BaseNamespaceDeclarationSyntax>
     {
         private readonly NamespaceDeclaration parent;
-        private readonly NamespaceDeclarationSyntax node;
+        private readonly BaseNamespaceDeclarationSyntax node;
 
-        public NamespaceDeclaration(Context cx, NamespaceDeclarationSyntax node, NamespaceDeclaration parent)
+        public NamespaceDeclaration(Context cx, BaseNamespaceDeclarationSyntax node, NamespaceDeclaration parent)
             : base(cx, node)
         {
             this.node = node;
@@ -28,7 +27,12 @@ namespace Semmle.Extraction.CSharp.Entities
 
         public override void Populate(TextWriter trapFile)
         {
-            var @namespace = (INamespaceSymbol)Context.GetModel(node).GetSymbolInfo(node.Name).Symbol!;
+            var @namespace = (INamespaceSymbol?)Context.GetModel(node).GetSymbolInfo(node.Name).Symbol;
+            if (@namespace is null)
+            {
+                throw new InternalError(node, "Namespace symbol not found");
+            }
+
             var ns = Namespace.Create(Context, @namespace);
             trapFile.namespace_declarations(this, ns);
             trapFile.namespace_declaration_location(this, Context.CreateLocation(node.Name.GetLocation()));
@@ -46,17 +50,17 @@ namespace Semmle.Extraction.CSharp.Entities
             }
         }
 
-        public static NamespaceDeclaration Create(Context cx, NamespaceDeclarationSyntax decl, NamespaceDeclaration parent)
+        public static NamespaceDeclaration Create(Context cx, BaseNamespaceDeclarationSyntax decl, NamespaceDeclaration parent)
         {
             var init = (decl, parent);
             return NamespaceDeclarationFactory.Instance.CreateEntity(cx, decl, init);
         }
 
-        private class NamespaceDeclarationFactory : CachedEntityFactory<(NamespaceDeclarationSyntax decl, NamespaceDeclaration parent), NamespaceDeclaration>
+        private class NamespaceDeclarationFactory : CachedEntityFactory<(BaseNamespaceDeclarationSyntax decl, NamespaceDeclaration parent), NamespaceDeclaration>
         {
             public static readonly NamespaceDeclarationFactory Instance = new NamespaceDeclarationFactory();
 
-            public override NamespaceDeclaration Create(Context cx, (NamespaceDeclarationSyntax decl, NamespaceDeclaration parent) init) =>
+            public override NamespaceDeclaration Create(Context cx, (BaseNamespaceDeclarationSyntax decl, NamespaceDeclaration parent) init) =>
                 new NamespaceDeclaration(cx, init.decl, init.parent);
         }
 

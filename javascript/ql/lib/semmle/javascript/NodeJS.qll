@@ -2,6 +2,9 @@
 
 import javascript
 private import NodeModuleResolutionImpl
+private import semmle.javascript.DynamicPropertyAccess as DynamicPropertyAccess
+private import semmle.javascript.internal.CachedStages
+private import semmle.javascript.dataflow.internal.DataFlowNode
 
 /**
  * A Node.js module.
@@ -90,6 +93,18 @@ class NodeModule extends Module {
             .getAnExportedValue(name)
     )
     or
+    // var imp = require('./imp');
+    // for (var name in imp){
+    //   module.exports[name] = imp[name];
+    // }
+    exists(DynamicPropertyAccess::EnumeratedPropName read, Import imp, DataFlow::PropWrite write |
+      read.getSourceObject().getALocalSource().asExpr() = imp and
+      getASourceProp(read) = write.getRhs() and
+      write.getBase() = this.getAModuleExportsNode() and
+      write.getPropertyNameExpr().flow().getImmediatePredecessor*() = read and
+      result = imp.getImportedModule().getAnExportedValue(name)
+    )
+    or
     // an externs definition (where appropriate)
     exists(PropAccess pacc | result = DataFlow::valueNode(pacc) |
       pacc.getBase() = this.getAModuleExportsNode().asExpr() and
@@ -100,6 +115,7 @@ class NodeModule extends Module {
   }
 
   override DataFlow::Node getABulkExportedNode() {
+    Stages::Imports::ref() and
     exists(DataFlow::PropWrite write |
       write.getBase().asExpr() = this.getModuleVariable().getAnAccess() and
       write.getPropertyName() = "exports" and
@@ -150,6 +166,21 @@ class NodeModule extends Module {
   }
 }
 
+// An copy of `DynamicPropertyAccess::EnumeratedPropName::getASourceProp` that doesn't use the callgraph.
+// This avoids making the module-imports recursive with the callgraph.
+private DataFlow::SourceNode getASourceProp(DynamicPropertyAccess::EnumeratedPropName prop) {
+  exists(DataFlow::Node base, DataFlow::Node key |
+    exists(DynamicPropertyAccess::DynamicPropRead read |
+      not read.hasDominatingAssignment() and
+      base = read.getBase() and
+      key = read.getPropertyNameNode() and
+      result = read
+    ) and
+    prop.getASourceObjectRef().flowsTo(base) and
+    key.getImmediatePredecessor*() = prop
+  )
+}
+
 /**
  * Gets an expression that syntactically could be a alias for `module.exports`.
  * This predicate exists to reduce the size of `getAModuleExportsNode`,
@@ -158,7 +189,7 @@ class NodeModule extends Module {
 pragma[noinline]
 private DataFlow::Node getAModuleExportsCandidate() {
   // A bit of manual magic
-  result = any(DataFlow::PropWrite w | exists(w.getPropertyName())).getBase()
+  result = any(DataFlow::PropWrite w).getBase()
   or
   result = DataFlow::valueNode(any(PropAccess p | exists(p.getPropertyName())).getBase())
   or
@@ -210,60 +241,78 @@ private class RequireVariable extends Variable {
  */
 private predicate moduleInFile(Module m, File f) { m.getFile() = f }
 
-private predicate isModuleModule(DataFlow::Node nd) {
-  exists(ImportDeclaration imp |
-    imp.getImportedPath().getValue() = "module" and
-    nd =
-      [
-        DataFlow::destructuredModuleImportNode(imp),
-        DataFlow::valueNode(imp.getASpecifier().(ImportNamespaceSpecifier))
-      ]
+private predicate isModuleModule(EarlyStageNode nd) {
+  exists(ImportDeclaration imp | imp.getImportedPath().getValue() = "module" |
+    nd = TDestructuredModuleImportNode(imp)
+    or
+    nd = TValueNode(imp.getASpecifier().(ImportNamespaceSpecifier))
   )
   or
-  isModuleModule(nd.getAPredecessor())
+  exists(EarlyStageNode other |
+    isModuleModule(other) and
+    DataFlow::localFlowStep(other, nd)
+  )
 }
 
-private predicate isCreateRequire(DataFlow::Node nd) {
+private predicate isCreateRequire(EarlyStageNode nd) {
   exists(PropAccess prop |
-    isModuleModule(prop.getBase().flow()) and
+    isModuleModule(TValueNode(prop.getBase())) and
     prop.getPropertyName() = "createRequire" and
-    nd = prop.flow()
+    nd = TValueNode(prop)
   )
   or
   exists(PropertyPattern prop |
-    isModuleModule(prop.getObjectPattern().flow()) and
+    isModuleModule(TValueNode(prop.getObjectPattern())) and
     prop.getName() = "createRequire" and
-    nd = prop.getValuePattern().flow()
+    nd = TValueNode(prop.getValuePattern())
   )
   or
   exists(ImportDeclaration decl, NamedImportSpecifier spec |
     decl.getImportedPath().getValue() = "module" and
     spec = decl.getASpecifier() and
     spec.getImportedName() = "createRequire" and
-    nd = spec.flow()
+    nd = TValueNode(spec)
   )
   or
-  isCreateRequire(nd.getAPredecessor())
+  exists(EarlyStageNode other |
+    isCreateRequire(other) and
+    DataFlow::localFlowStep(other, nd)
+  )
 }
 
 /**
  * Holds if `nd` may refer to `require`, either directly or modulo local data flow.
  */
 cached
-private predicate isRequire(DataFlow::Node nd) {
-  nd.asExpr() = any(RequireVariable req).getAnAccess() and
-  // `mjs` files explicitly disallow `require`
-  not nd.getFile().getExtension() = "mjs"
+private predicate isRequire(EarlyStageNode nd) {
+  exists(VarAccess access |
+    access = any(RequireVariable v).getAnAccess() and
+    nd = TValueNode(access) and
+    // `mjs` files explicitly disallow `require`
+    not access.getFile().getExtension() = "mjs"
+  )
   or
-  isRequire(nd.getAPredecessor())
+  exists(EarlyStageNode other |
+    isRequire(other) and
+    DataFlow::localFlowStep(other, nd)
+  )
   or
   // `import { createRequire } from 'module';`.
   // specialized to ES2015 modules to avoid recursion in the `DataFlow::moduleImport()` predicate and to avoid
   // negative recursion between `Import.getImportedModuleNode()` and `Import.getImportedModule()`, and
   // to avoid depending on `SourceNode` as this would make `SourceNode::Range` recursive.
   exists(CallExpr call |
-    isCreateRequire(call.getCallee().flow()) and
-    nd = call.flow()
+    isCreateRequire(TValueNode(call.getCallee())) and
+    nd = TValueNode(call)
+  )
+  or
+  // `$.require('underscore');`.
+  // NPM as supported in [XSJS files](https://www.npmjs.com/package/@sap/async-xsjs#npm-packages-support).
+  exists(MethodCallExpr require |
+    require.getFile().getExtension() = ["xsjs", "xsjslib"] and
+    require.getCalleeName() = "require" and
+    require.getReceiver().(GlobalVarAccess).getName() = "$" and
+    nd = TValueNode(require.getCallee())
   )
 }
 
@@ -277,7 +326,7 @@ private predicate isRequire(DataFlow::Node nd) {
  * ```
  */
 class Require extends CallExpr, Import {
-  Require() { isRequire(this.getCallee().flow()) }
+  Require() { isRequire(TValueNode(this.getCallee())) }
 
   override PathExpr getImportedPath() { result = this.getArgument(0) }
 
@@ -286,7 +335,7 @@ class Require extends CallExpr, Import {
   override Module resolveImportedPath() {
     moduleInFile(result, this.load(min(int prio | moduleInFile(_, this.load(prio)))))
     or
-    not exists(Module mod | moduleInFile(mod, this.load(_))) and
+    not moduleInFile(_, this.load(_)) and
     result = Import.super.resolveImportedPath()
   }
 
@@ -371,7 +420,7 @@ private class RequirePath extends PathExprCandidate {
     this = any(Require req).getArgument(0)
     or
     exists(MethodCallExpr reqres |
-      isRequire(reqres.getReceiver().flow()) and
+      isRequire(TValueNode(reqres.getReceiver())) and
       reqres.getMethodName() = "resolve" and
       this = reqres.getArgument(0)
     )

@@ -10,7 +10,8 @@
 
 // This is an implementation of the Rubocop rule
 // https://github.com/rubocop/rubocop-performance/blob/master/lib/rubocop/cop/performance/detect.rb
-import ruby
+import codeql.ruby.AST
+import codeql.ruby.CFG
 import codeql.ruby.dataflow.SSA
 
 /** A call that extracts the first or last element of a list. */
@@ -24,7 +25,7 @@ class EndCall extends MethodCall {
       this.getNumberOfArguments() = 0
       or
       this.getNumberOfArguments() = 1 and
-      this.getArgument(0).(IntegerLiteral).getValueText() = "0"
+      this.getArgument(0).getConstantValue().isInt(0)
     )
     or
     detect = "reverse_detect" and
@@ -33,7 +34,7 @@ class EndCall extends MethodCall {
       this.getNumberOfArguments() = 0
       or
       this.getNumberOfArguments() = 1 and
-      this.getArgument(0).(UnaryMinusExpr).getOperand().(IntegerLiteral).getValueText() = "1"
+      this.getArgument(0).getConstantValue().isInt(-1)
     )
   }
 
@@ -41,12 +42,12 @@ class EndCall extends MethodCall {
 }
 
 Expr getUniqueRead(Expr e) {
-  exists(AssignExpr ae |
-    e = ae.getRightOperand() and
-    forex(Ssa::WriteDefinition def | def.getWriteAccess() = ae.getLeftOperand() |
+  forex(CfgNode eNode | eNode.getAstNode() = e |
+    exists(Ssa::WriteDefinition def |
+      def.assigns(eNode) and
       strictcount(def.getARead()) = 1 and
       not def = any(Ssa::PhiNode phi).getAnInput() and
-      def.getARead() = result.getAControlFlowNode()
+      def.getARead().getAstNode() = result
     )
   )
 }

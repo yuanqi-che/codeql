@@ -4,9 +4,6 @@ foo()
 # call whose name is a scope resolution
 Foo::bar()
 
-# call whose name is a global scope resolution
-::bar()
-
 # call with a receiver, no arguments or block
 123.bar
 
@@ -265,14 +262,16 @@ X::foo rescue X::bar
 # block argument
 foo(&bar)
 foo(&X::bar)
-
+foo(&)
 # splat argument
 foo(*bar)
 foo(*X::bar)
+foo(*)
 
 # hash-splat argument
 foo(**bar)
 foo(**X::bar)
+foo(**)
 
 # the value in a keyword argument
 foo(blah: bar)
@@ -340,3 +339,25 @@ end
 for x, y, z in [[1,2,3], [4,5,6]]
   foo x, y, z
 end
+
+foo(x: 42)
+foo(x:, novar:)
+foo(X: 42)
+foo(X:)
+
+# calls inside lambdas
+y = 1
+one = ->(x) { y }
+f = ->(x) { foo x }
+g = ->(x) { unknown_call }
+h = -> (x) do
+  x
+  y
+  unknown_call
+end
+
+# calls with various call operators
+list.empty?
+list&.empty?
+list::empty?
+foo&.bar(1,2) { |x| x }

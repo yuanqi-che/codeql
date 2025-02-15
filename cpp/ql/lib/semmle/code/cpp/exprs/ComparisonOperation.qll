@@ -49,16 +49,6 @@ class RelationalOperation extends ComparisonOperation, @rel_op_expr {
   override int getPrecedence() { result = 10 }
 
   /**
-   * DEPRECATED: Use `getGreaterOperand()` instead.
-   */
-  deprecated Expr getLarge() { result = getGreaterOperand() }
-
-  /**
-   * DEPRECATED: Use `getLesserOperand()` instead.
-   */
-  deprecated Expr getSmall() { result = getLesserOperand() }
-
-  /**
    * Gets the operand on the "greater" (or "greater-or-equal") side
    * of this relational expression, that is, the side that is larger
    * if the overall expression evaluates to `true`; for example on
@@ -86,9 +76,9 @@ class GTExpr extends RelationalOperation, @gtexpr {
 
   override string getOperator() { result = ">" }
 
-  override Expr getGreaterOperand() { result = getLeftOperand() }
+  override Expr getGreaterOperand() { result = this.getLeftOperand() }
 
-  override Expr getLesserOperand() { result = getRightOperand() }
+  override Expr getLesserOperand() { result = this.getRightOperand() }
 }
 
 /**
@@ -102,9 +92,9 @@ class LTExpr extends RelationalOperation, @ltexpr {
 
   override string getOperator() { result = "<" }
 
-  override Expr getGreaterOperand() { result = getRightOperand() }
+  override Expr getGreaterOperand() { result = this.getRightOperand() }
 
-  override Expr getLesserOperand() { result = getLeftOperand() }
+  override Expr getLesserOperand() { result = this.getLeftOperand() }
 }
 
 /**
@@ -118,9 +108,9 @@ class GEExpr extends RelationalOperation, @geexpr {
 
   override string getOperator() { result = ">=" }
 
-  override Expr getGreaterOperand() { result = getLeftOperand() }
+  override Expr getGreaterOperand() { result = this.getLeftOperand() }
 
-  override Expr getLesserOperand() { result = getRightOperand() }
+  override Expr getLesserOperand() { result = this.getRightOperand() }
 }
 
 /**
@@ -134,7 +124,7 @@ class LEExpr extends RelationalOperation, @leexpr {
 
   override string getOperator() { result = "<=" }
 
-  override Expr getGreaterOperand() { result = getRightOperand() }
+  override Expr getGreaterOperand() { result = this.getRightOperand() }
 
-  override Expr getLesserOperand() { result = getLeftOperand() }
+  override Expr getLesserOperand() { result = this.getLeftOperand() }
 }

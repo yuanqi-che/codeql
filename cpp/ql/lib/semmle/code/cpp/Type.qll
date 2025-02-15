@@ -4,6 +4,7 @@
 
 import semmle.code.cpp.Element
 import semmle.code.cpp.Function
+import semmle.code.cpp.TemplateParameter
 private import semmle.code.cpp.internal.ResolveClass
 
 /**
@@ -39,8 +40,8 @@ class Type extends Locatable, @type {
 
   /**
    * Gets a specifier of this type, recursively looking through `typedef` and
-   * `decltype`. For example, in the context of `typedef const int *restrict
-   * t`, the type `volatile t` has specifiers `volatile` and `restrict` but not
+   * `decltype`. For example, in the context of `typedef const int *restrict t`,
+   * the type `volatile t` has specifiers `volatile` and `restrict` but not
    * `const` since the `const` is attached to the type being pointed to rather
    * than the pointer itself.
    */
@@ -94,6 +95,7 @@ class Type extends Locatable, @type {
    * The result of this predicate will be the type itself, except in the case of a TypedefType or a Decltype,
    * in which case the result will be type which results from (possibly recursively) resolving typedefs.
    */
+  pragma[nomagic]
   Type getUnderlyingType() { result = this }
 
   /**
@@ -287,10 +289,7 @@ class Type extends Locatable, @type {
    */
   Type stripType() { result = this }
 
-  override Location getLocation() {
-    suppressUnusedThis(this) and
-    result instanceof UnknownDefaultLocation
-  }
+  override Location getLocation() { result instanceof UnknownDefaultLocation }
 }
 
 /**
@@ -407,10 +406,7 @@ class IntegralOrEnumType extends Type {
     isIntegralType(underlyingElement(this), _)
     or
     // Enum type
-    (
-      usertypes(underlyingElement(this), _, 4) or
-      usertypes(underlyingElement(this), _, 13)
-    )
+    usertypes(underlyingElement(this), _, [4, 13])
   }
 }
 
@@ -813,8 +809,35 @@ private predicate floatingPointTypeMapping(
   // _Float128
   kind = 49 and base = 2 and domain = TRealDomain() and realKind = 49 and extended = false
   or
-  // _Float128x
-  kind = 50 and base = 2 and domain = TRealDomain() and realKind = 50 and extended = true
+  // _Float16
+  kind = 52 and base = 2 and domain = TRealDomain() and realKind = 52 and extended = false
+  or
+  // _Complex _Float16
+  kind = 53 and base = 2 and domain = TComplexDomain() and realKind = 52 and extended = false
+  or
+  // __fp16
+  kind = 54 and base = 2 and domain = TRealDomain() and realKind = 54 and extended = false
+  or
+  // __bf16
+  kind = 55 and base = 2 and domain = TRealDomain() and realKind = 55 and extended = false
+  or
+  // std::float16_t
+  kind = 56 and base = 2 and domain = TRealDomain() and realKind = 56 and extended = false
+  or
+  // _Complex _Float32
+  kind = 57 and base = 2 and domain = TComplexDomain() and realKind = 45 and extended = false
+  or
+  // _Complex _Float32x
+  kind = 58 and base = 2 and domain = TComplexDomain() and realKind = 46 and extended = true
+  or
+  // _Complex _Float64
+  kind = 59 and base = 2 and domain = TComplexDomain() and realKind = 47 and extended = false
+  or
+  // _Complex _Float64x
+  kind = 60 and base = 2 and domain = TComplexDomain() and realKind = 48 and extended = true
+  or
+  // _Complex _Float128
+  kind = 61 and base = 2 and domain = TComplexDomain() and realKind = 49 and extended = false
 }
 
 /**
@@ -1085,50 +1108,6 @@ class DerivedType extends Type, @derivedtype {
   override predicate involvesTemplateParameter() { this.getBaseType().involvesTemplateParameter() }
 
   override Type stripType() { result = this.getBaseType().stripType() }
-
-  /**
-   * Holds if this type has the `__autoreleasing` specifier or if it points to
-   * a type with the `__autoreleasing` specifier.
-   *
-   * DEPRECATED: use `hasSpecifier` directly instead.
-   */
-  deprecated predicate isAutoReleasing() {
-    this.hasSpecifier("__autoreleasing") or
-    this.(PointerType).getBaseType().hasSpecifier("__autoreleasing")
-  }
-
-  /**
-   * Holds if this type has the `__strong` specifier or if it points to
-   * a type with the `__strong` specifier.
-   *
-   * DEPRECATED: use `hasSpecifier` directly instead.
-   */
-  deprecated predicate isStrong() {
-    this.hasSpecifier("__strong") or
-    this.(PointerType).getBaseType().hasSpecifier("__strong")
-  }
-
-  /**
-   * Holds if this type has the `__unsafe_unretained` specifier or if it points
-   * to a type with the `__unsafe_unretained` specifier.
-   *
-   * DEPRECATED: use `hasSpecifier` directly instead.
-   */
-  deprecated predicate isUnsafeRetained() {
-    this.hasSpecifier("__unsafe_unretained") or
-    this.(PointerType).getBaseType().hasSpecifier("__unsafe_unretained")
-  }
-
-  /**
-   * Holds if this type has the `__weak` specifier or if it points to
-   * a type with the `__weak` specifier.
-   *
-   * DEPRECATED: use `hasSpecifier` directly instead.
-   */
-  deprecated predicate isWeak() {
-    this.hasSpecifier("__weak") or
-    this.(PointerType).getBaseType().hasSpecifier("__weak")
-  }
 }
 
 /**
@@ -1683,60 +1662,27 @@ class RoutineType extends Type, @routinetype {
 }
 
 /**
- * A C++ `typename` (or `class`) template parameter.
+ * A source code location referring to a user-defined type.
  *
- * In the example below, `T` is a template parameter:
- * ```
- * template <class T>
- * class C { };
- * ```
- */
-class TemplateParameter extends UserType {
-  TemplateParameter() {
-    usertypes(underlyingElement(this), _, 7) or usertypes(underlyingElement(this), _, 8)
-  }
-
-  override string getAPrimaryQlClass() { result = "TemplateParameter" }
-
-  override predicate involvesTemplateParameter() { any() }
-}
-
-/**
- * A C++ template template parameter.
+ * Note that only _user-defined_ types have `TypeMention`s. In particular,
+ * built-in types, and derived types with built-in types as their base don't
+ * have any `TypeMention`s. For example, given
+ * ```cpp
+ * struct S { ... };
+ * void f(S s1, int i1) {
+ *   S s2;
+ *   S* s3;
+ *   S& s4 = s2;
+ *   decltype(s2) s5;
  *
- * In the example below, `T` is a template template parameter (although its name
- * may be omitted):
+ *   int i2;
+ *   int* i3;
+ *   int i4[10];
+ * }
  * ```
- * template <template <typename T> class Container, class Elem>
- * void foo(const Container<Elem> &value) { }
- * ```
+ * there will be a `TypeMention` for the mention of `S` at `S s1`, `S s2`, and `S& s4 = s2`,
+ * but not at `decltype(s2) s5`. Additionally, there will be no `TypeMention`s for `int`.
  */
-class TemplateTemplateParameter extends TemplateParameter {
-  TemplateTemplateParameter() { usertypes(underlyingElement(this), _, 8) }
-
-  override string getAPrimaryQlClass() { result = "TemplateTemplateParameter" }
-}
-
-/**
- * A type representing the use of the C++11 `auto` keyword.
- * ```
- * auto val = some_typed_expr();
- * ```
- */
-class AutoType extends TemplateParameter {
-  AutoType() { usertypes(underlyingElement(this), "auto", 7) }
-
-  override string getAPrimaryQlClass() { result = "AutoType" }
-
-  override Location getLocation() {
-    suppressUnusedThis(this) and
-    result instanceof UnknownDefaultLocation
-  }
-}
-
-private predicate suppressUnusedThis(Type t) { any() }
-
-/** A source code location referring to a type */
 class TypeMention extends Locatable, @type_mention {
   override string toString() { result = "type mention" }
 
