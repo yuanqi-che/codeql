@@ -4,6 +4,7 @@
  *              may lead to remote code execution.
  * @kind path-problem
  * @problem.severity error
+ * @security-severity 9.3
  * @precision high
  * @id java/spel-expression-injection
  * @tags security
@@ -13,8 +14,9 @@
 import java
 import semmle.code.java.security.SpelInjectionQuery
 import semmle.code.java.dataflow.DataFlow
-import DataFlow::PathGraph
+import SpelInjectionFlow::PathGraph
 
-from DataFlow::PathNode source, DataFlow::PathNode sink, SpelInjectionConfig conf
-where conf.hasFlowPath(source, sink)
-select sink.getNode(), source, sink, "SpEL injection from $@.", source.getNode(), "this user input"
+from SpelInjectionFlow::PathNode source, SpelInjectionFlow::PathNode sink
+where SpelInjectionFlow::flowPath(source, sink)
+select sink.getNode(), source, sink, "SpEL expression depends on a $@.", source.getNode(),
+  "user-provided value"

@@ -10,6 +10,7 @@ import semmle.python.Class
 import semmle.python.Import
 import semmle.python.Stmts
 import semmle.python.Exprs
+import semmle.python.Patterns
 import semmle.python.Keywords
 import semmle.python.Comprehensions
 import semmle.python.Flow
@@ -25,7 +26,6 @@ import semmle.python.types.FunctionObject
 import semmle.python.types.ModuleObject
 import semmle.python.types.Version
 import semmle.python.types.Descriptors
-import semmle.python.protocols
 import semmle.python.SSA
 import semmle.python.SelfAttribute
 import semmle.python.types.Properties

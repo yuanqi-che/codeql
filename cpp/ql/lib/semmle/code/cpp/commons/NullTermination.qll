@@ -1,7 +1,7 @@
 import cpp
 private import semmle.code.cpp.models.interfaces.ArrayFunction
 private import semmle.code.cpp.models.implementations.Strcat
-import semmle.code.cpp.dataflow.DataFlow
+private import semmle.code.cpp.ir.dataflow.DataFlow
 
 /**
  * Holds if the expression `e` assigns something including `va` to a
@@ -102,6 +102,21 @@ predicate functionArgumentMustBeNullTerminated(Function f, int i) {
 }
 
 /**
+ * Holds if `arg` is a string format argument to a formatting function call
+ * `ffc`.
+ */
+predicate formatArgumentMustBeNullTerminated(FormattingFunctionCall ffc, Expr arg) {
+  // String argument to a formatting function (such as `printf`)
+  exists(int n, FormatLiteral fl |
+    ffc.getConversionArgument(n) = arg and
+    fl = ffc.getFormat() and
+    fl.getConversionType(n) instanceof PointerType and // `%s`, `%ws` etc
+    not fl.getConversionType(n) instanceof VoidPointerType and // exclude: `%p`
+    not fl.hasPrecision(n) // exclude: `%.*s`
+  )
+}
+
+/**
  * Holds if `va` is a variable access where the contents must be null terminated.
  */
 predicate variableMustBeNullTerminated(VariableAccess va) {
@@ -113,13 +128,7 @@ predicate variableMustBeNullTerminated(VariableAccess va) {
     )
     or
     // String argument to a formatting function (such as `printf`)
-    exists(int n, FormatLiteral fl |
-      fc.(FormattingFunctionCall).getConversionArgument(n) = va and
-      fl = fc.(FormattingFunctionCall).getFormat() and
-      fl.getConversionType(n) instanceof PointerType and // `%s`, `%ws` etc
-      not fl.getConversionType(n) instanceof VoidPointerType and // exclude: `%p`
-      not fl.hasPrecision(n) // exclude: `%.*s`
-    )
+    formatArgumentMustBeNullTerminated(fc, va)
     or
     // Call to a wrapper function that requires null termination
     // (not itself adding a null terminator)

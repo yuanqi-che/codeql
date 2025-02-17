@@ -1,5 +1,5 @@
 import javascript
-import semmle.javascript.security.dataflow.Xss
+import semmle.javascript.security.dataflow.DomBasedXssCustomizations
 
 query predicate component_getAPropertyValue(Vue::Component c, string name, DataFlow::Node prop) {
   c.getAPropertyValue(name) = prop
@@ -20,3 +20,11 @@ query predicate templateElement(Vue::Template::Element template) { any() }
 query predicate xssSink(DomBasedXss::Sink s) { any() }
 
 query RemoteFlowSource remoteFlowSource() { any() }
+
+query predicate parseErrors(JSParseError err) { exists(err) }
+
+query predicate attribute(HTML::Attribute attrib, string name) { attrib.getName() = name }
+
+query predicate threatModelSource(ThreatModelSource source, string kind) {
+  kind = source.getThreatModel()
+}

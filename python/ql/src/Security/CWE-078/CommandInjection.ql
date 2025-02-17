@@ -15,10 +15,10 @@
  */
 
 import python
-import semmle.python.security.dataflow.CommandInjection
-import DataFlow::PathGraph
+import semmle.python.security.dataflow.CommandInjectionQuery
+import CommandInjectionFlow::PathGraph
 
-from CommandInjection::Configuration config, DataFlow::PathNode source, DataFlow::PathNode sink
-where config.hasFlowPath(source, sink)
-select sink.getNode(), source, sink, "This command depends on $@.", source.getNode(),
-  "a user-provided value"
+from CommandInjectionFlow::PathNode source, CommandInjectionFlow::PathNode sink
+where CommandInjectionFlow::flowPath(source, sink)
+select sink.getNode(), source, sink, "This command line depends on a $@.", source.getNode(),
+  "user-provided value"

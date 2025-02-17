@@ -5,13 +5,9 @@
  */
 
 import Expr
-import semmle.code.csharp.Callable
-import semmle.code.csharp.dataflow.CallContext as CallContext
-private import semmle.code.csharp.dataflow.internal.DelegateDataFlow
 private import semmle.code.csharp.dataflow.internal.DataFlowDispatch
 private import semmle.code.csharp.dataflow.internal.DataFlowImplCommon
 private import semmle.code.csharp.dispatch.Dispatch
-private import dotnet
 
 /**
  * A call. Either a method call (`MethodCall`), a constructor initializer call
@@ -19,7 +15,7 @@ private import dotnet
  * a delegate call (`DelegateCall`), an accessor call (`AccessorCall`), a
  * constructor call (`ObjectCreation`), or a local function call (`LocalFunctionCall`).
  */
-class Call extends DotNet::Call, Expr, @call {
+class Call extends Expr, @call {
   /**
    * Gets the static (compile-time) target of this call. For example, the
    * static target of `x.M()` on line 9 is `A.M` in
@@ -41,13 +37,19 @@ class Call extends DotNet::Call, Expr, @call {
    * Use `getARuntimeTarget()` instead to get a potential run-time target (will
    * include `B.M` in the example above).
    */
-  override Callable getTarget() { none() }
+  Callable getTarget() { none() }
 
-  override Expr getArgument(int i) { result = this.getChild(i) and i >= 0 }
+  /** Gets the `i`th argument to this call, if any. */
+  Expr getArgument(int i) { result = this.getChild(i) and i >= 0 }
 
-  override Expr getRawArgument(int i) { result = this.getArgument(i) }
+  /**
+   * Gets the `i`th "raw" argument to this call, if any.
+   * For instance methods, argument 0 is the qualifier.
+   */
+  Expr getRawArgument(int i) { result = this.getArgument(i) }
 
-  override Expr getAnArgument() { result = this.getArgument(_) }
+  /** Gets an argument to this call. */
+  Expr getAnArgument() { result = this.getArgument(_) }
 
   /** Gets the number of arguments of this call. */
   int getNumberOfArguments() { result = count(this.getAnArgument()) }
@@ -60,60 +62,28 @@ class Call extends DotNet::Call, Expr, @call {
    *
    * This takes into account both positional and named arguments, but does not
    * consider default arguments.
-   *
-   * An argument must always have a type that is convertible to the relevant
-   * parameter type. Therefore, `params` arguments are only taken into account
-   * when they are passed as explicit arrays. For example, in the call to `M1`
-   * on line 5, `o` is not an argument for `M1`'s `args` parameter, while
-   * `new object[] { o }` on line 6 is, in
-   *
-   * ```csharp
-   * class C {
-   *   void M1(params object[] args) { }
-   *
-   *   void M2(object o) {
-   *     M1(o);
-   *     M1(new object[] { o });
-   *   }
-   * }
-   * ```
    */
   cached
-  override Expr getArgumentForParameter(DotNet::Parameter p) {
+  Expr getArgumentForParameter(Parameter p) {
+    // Appears in the positional part of the call
+    result = this.getImplicitArgument(p)
+    or
+    // Appears in the named part of the call
     this.getTarget().getAParameter() = p and
-    (
-      // Appears in the positional part of the call
-      result = this.getImplicitArgument(p.getPosition()) and
-      (
-        p.(Parameter).isParams()
-        implies
-        (
-          isValidExplicitParamsType(p, result.getType()) and
-          not this.hasMultipleParamsArguments()
-        )
-      )
-      or
-      // Appears in the named part of the call
-      result = this.getExplicitArgument(p.getName()) and
-      (p.(Parameter).isParams() implies isValidExplicitParamsType(p, result.getType()))
-    )
-  }
-
-  /**
-   * Holds if this call has multiple arguments for a `params` parameter
-   * of the targeted callable.
-   */
-  private predicate hasMultipleParamsArguments() {
-    exists(Parameter p | p = this.getTarget().getAParameter() |
-      p.isParams() and
-      exists(this.getArgument(any(int i | i > p.getPosition())))
-    )
+    result = this.getExplicitArgument(p.getName())
   }
 
   pragma[noinline]
-  private Expr getImplicitArgument(int pos) {
-    result = this.getArgument(pos) and
-    not exists(result.getExplicitArgumentName())
+  private Expr getImplicitArgument(Parameter p) {
+    this.getTarget().getAParameter() = p and
+    not exists(result.getExplicitArgumentName()) and
+    (
+      p.(Parameter).isParams() and
+      result = this.getArgument(any(int i | i >= p.getPosition()))
+      or
+      not p.(Parameter).isParams() and
+      result = this.getArgument(p.getPosition())
+    )
   }
 
   pragma[nomagic]
@@ -176,10 +146,10 @@ class Call extends DotNet::Call, Expr, @call {
    * - Line 10: The static target is `Type.InvokeMember()`, whereas the run-time targets
    *   are both `A.M()` and `B.M()`.
    *
-   * - Line 16: There is no static target (delegate call) but the delegate `i => { }` (line
-   *   20) is a run-time target.
+   * - Line 16: There is no static target (delegate call) but the delegate `i => { }`
+   *   (line 20) is a run-time target.
    */
-  override Callable getARuntimeTarget() {
+  Callable getARuntimeTarget() {
     exists(DispatchCall dc | dc.getCall() = this | result = dc.getADynamicTarget())
   }
 
@@ -216,13 +186,37 @@ class Call extends DotNet::Call, Expr, @call {
   /**
    * Gets the argument that corresponds to parameter `p` of a potential
    * run-time target of this call.
+   *
+   * This takes into account both positional and named arguments, but does not
+   * consider default arguments.
    */
+  cached
   Expr getRuntimeArgumentForParameter(Parameter p) {
-    exists(Callable c |
-      c = this.getARuntimeTarget() and
-      p = c.getAParameter() and
+    // Appears in the positional part of the call
+    result = this.getImplicitRuntimeArgument(p)
+    or
+    // Appears in the named part of the call
+    this.getARuntimeTarget().getAParameter() = p and
+    result = this.getExplicitRuntimeArgument(p.getName())
+  }
+
+  pragma[noinline]
+  private Expr getImplicitRuntimeArgument(Parameter p) {
+    this.getARuntimeTarget().getAParameter() = p and
+    not exists(result.getExplicitArgumentName()) and
+    (
+      p.isParams() and
+      result = this.getRuntimeArgument(any(int i | i >= p.getPosition()))
+      or
+      not p.isParams() and
       result = this.getRuntimeArgument(p.getPosition())
     )
+  }
+
+  pragma[nomagic]
+  private Expr getExplicitRuntimeArgument(string name) {
+    result = this.getARuntimeArgument() and
+    result.getExplicitArgumentName() = name
   }
 
   /**
@@ -258,28 +252,6 @@ class Call extends DotNet::Call, Expr, @call {
 }
 
 /**
- * Holds if the type `t` is a valid argument type for passing an explicit array
- * to the `params` parameter `p`. For example, the types `object[]` and `string[]`
- * of the arguments on lines 4 and 5, respectively, are valid for the parameter
- * `args` on line 1 in
- *
- * ```csharp
- * void M(params object[] args) { ... }
- *
- * void CallM(object[] os, string[] ss, string s) {
- *   M(os);
- *   M(ss);
- *   M(s);
- * }
- * ```
- */
-pragma[nomagic]
-private predicate isValidExplicitParamsType(Parameter p, Type t) {
-  p.isParams() and
-  t.isImplicitlyConvertibleTo(p.getType())
-}
-
-/**
  * A method call, for example `a.M()` on line 5 in
  *
  * ```csharp
@@ -308,6 +280,10 @@ class MethodCall extends Call, QualifiableExpr, LateBindableExpr, @method_invoca
       or
       result = this.getArgument(i - 1)
     else result = this.getArgument(i)
+  }
+
+  override Expr stripImplicit() {
+    if this.isImplicit() then result = this.getQualifier().stripImplicit() else result = this
   }
 }
 
@@ -420,7 +396,7 @@ class ConstructorInitializer extends Call, @constructor_init_expr {
   }
 
   /**
-   * Holds if this initialier is a `this` initializer, for example `this(0)`
+   * Holds if this initializer is a `this` initializer, for example `this(0)`
    * in
    *
    * ```csharp
@@ -434,7 +410,7 @@ class ConstructorInitializer extends Call, @constructor_init_expr {
   predicate isThis() { this.getTargetType() = this.getConstructorType() }
 
   /**
-   * Holds if this initialier is a `base` initializer, for example `base(0)`
+   * Holds if this initializer is a `base` initializer, for example `base(0)`
    * in
    *
    * ```csharp
@@ -538,19 +514,6 @@ class DelegateLikeCall extends Call, DelegateLikeCall_ {
   override Callable getTarget() { none() }
 
   /**
-   * DEPRECATED: Use `getARuntimeTarget/0` instead.
-   *
-   * Gets a potential run-time target of this delegate or function pointer call in the given
-   * call context `cc`.
-   */
-  deprecated Callable getARuntimeTarget(CallContext::CallContext cc) {
-    exists(DelegateLikeCallExpr call |
-      this = call.getCall() and
-      result = call.getARuntimeTarget(cc)
-    )
-  }
-
-  /**
    * Gets the delegate or function pointer expression of this call. For example, the
    * delegate expression of `X()` on line 5 is the access to the field `X` in
    *
@@ -569,7 +532,7 @@ class DelegateLikeCall extends Call, DelegateLikeCall_ {
   final override Callable getARuntimeTarget() {
     exists(ExplicitDelegateLikeDataFlowCall call |
       this = call.getCall() and
-      result = viableCallableLambda(call, _)
+      result = viableCallableLambda(call, _).asCallable(_)
     )
   }
 
@@ -590,48 +553,6 @@ class DelegateLikeCall extends Call, DelegateLikeCall_ {
  * ```
  */
 class DelegateCall extends DelegateLikeCall, @delegate_invocation_expr {
-  /**
-   * DEPRECATED: Use `getARuntimeTarget/0` instead.
-   *
-   * Gets a potential run-time target of this delegate call in the given
-   * call context `cc`.
-   */
-  deprecated override Callable getARuntimeTarget(CallContext::CallContext cc) {
-    result = DelegateLikeCall.super.getARuntimeTarget(cc)
-    or
-    exists(AddEventSource aes, CallContext::CallContext cc2 |
-      aes = this.getAnAddEventSource(_) and
-      result = aes.getARuntimeTarget(cc2)
-    |
-      aes = this.getAnAddEventSourceSameEnclosingCallable() and
-      cc = cc2
-      or
-      // The event is added in another callable, so the call context is not relevant
-      aes = this.getAnAddEventSourceDifferentEnclosingCallable() and
-      cc instanceof CallContext::EmptyCallContext
-    )
-  }
-
-  deprecated private AddEventSource getAnAddEventSource(Callable enclosingCallable) {
-    this.getExpr().(EventAccess).getTarget() = result.getEvent() and
-    enclosingCallable = result.getExpr().getEnclosingCallable()
-  }
-
-  deprecated private AddEventSource getAnAddEventSourceSameEnclosingCallable() {
-    result = this.getAnAddEventSource(this.getEnclosingCallable())
-  }
-
-  deprecated private AddEventSource getAnAddEventSourceDifferentEnclosingCallable() {
-    exists(Callable c | result = this.getAnAddEventSource(c) | c != this.getEnclosingCallable())
-  }
-
-  /**
-   * DEPRECATED: use `getExpr` instead.
-   *
-   * Gets the delegate expression of this call.
-   */
-  deprecated Expr getDelegateExpr() { result = this.getExpr() }
-
   override string toString() { result = "delegate call" }
 
   override string getAPrimaryQlClass() { result = "DelegateCall" }

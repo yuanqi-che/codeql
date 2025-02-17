@@ -4,6 +4,7 @@
  *              to match may be vulnerable to denial-of-service attacks.
  * @kind path-problem
  * @problem.severity warning
+ * @security-severity 7.5
  * @precision high
  * @id py/polynomial-redos
  * @tags security
@@ -13,22 +14,21 @@
  */
 
 import python
-import semmle.python.security.performance.SuperlinearBackTracking
-import semmle.python.security.dataflow.PolynomialReDoS
-import DataFlow::PathGraph
+import semmle.python.security.dataflow.PolynomialReDoSQuery
+import PolynomialReDoSFlow::PathGraph
 
 from
-  PolynomialReDoS::Configuration config, DataFlow::PathNode source, DataFlow::PathNode sink,
-  PolynomialReDoS::Sink sinkNode, PolynomialBackTrackingTerm regexp
+  PolynomialReDoSFlow::PathNode source, PolynomialReDoSFlow::PathNode sink, Sink sinkNode,
+  PolynomialBackTrackingTerm regexp
 where
-  config.hasFlowPath(source, sink) and
+  PolynomialReDoSFlow::flowPath(source, sink) and
   sinkNode = sink.getNode() and
-  regexp.getRootTerm() = sinkNode.getRegExp()
+  regexp = sinkNode.getABacktrackingTerm()
 //   not (
 //     source.getNode().(Source).getKind() = "url" and
 //     regexp.isAtEndLine()
 //   )
 select sinkNode.getHighlight(), source, sink,
-  "This $@ that depends on $@ may run slow on strings " + regexp.getPrefixMessage() +
+  "This $@ that depends on a $@ may run slow on strings " + regexp.getPrefixMessage() +
     "with many repetitions of '" + regexp.getPumpString() + "'.", regexp, "regular expression",
-  source.getNode(), "a user-provided value"
+  source.getNode(), "user-provided value"

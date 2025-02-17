@@ -1,27 +1,48 @@
+/actions/ @github/codeql-dynamic
 /cpp/ @github/codeql-c-analysis
 /csharp/ @github/codeql-csharp
+/csharp/autobuilder/Semmle.Autobuild.Cpp @github/codeql-c-extractor
+/csharp/autobuilder/Semmle.Autobuild.Cpp.Tests @github/codeql-c-extractor
+/go/ @github/codeql-go
 /java/ @github/codeql-java
 /javascript/ @github/codeql-javascript
 /python/ @github/codeql-python
 /ruby/ @github/codeql-ruby
-
-# Make @xcorail (GitHub Security Lab) a code owner for experimental queries so he gets pinged when we promote a query out of experimental
-/cpp/**/experimental/**/* @github/codeql-c-analysis @xcorail
-/csharp/**/experimental/**/* @github/codeql-csharp @xcorail
-/java/**/experimental/**/* @github/codeql-java @xcorail
-/javascript/**/experimental/**/* @github/codeql-javascript @xcorail
-/python/**/experimental/**/* @github/codeql-python @xcorail
-/ruby/**/experimental/**/* @github/codeql-ruby @xcorail
-
-# Notify members of codeql-go about PRs to the shared data-flow library files
-/java/ql/src/semmle/code/java/dataflow/internal/DataFlowImpl.qll @github/codeql-java @github/codeql-go
-/java/ql/src/semmle/code/java/dataflow/internal/DataFlowImpl2.qll @github/codeql-java @github/codeql-go
-/java/ql/src/semmle/code/java/dataflow/internal/DataFlowImplCommon.qll @github/codeql-java @github/codeql-go
-/java/ql/src/semmle/code/java/dataflow/internal/tainttracking1/TaintTrackingImpl.qll @github/codeql-java @github/codeql-go
-/java/ql/src/semmle/code/java/dataflow/internal/tainttracking2/TaintTrackingImpl.qll @github/codeql-java @github/codeql-go
+/swift/ @github/codeql-swift
+/misc/codegen/ @github/codeql-swift
+/java/kotlin-extractor/ @github/codeql-kotlin
+/java/ql/test-kotlin1/ @github/codeql-kotlin
+/java/ql/test-kotlin2/ @github/codeql-kotlin
 
 # CodeQL tools and associated docs
-/docs/codeql-cli/ @github/codeql-cli-reviewers
-/docs/codeql-for-visual-studio-code/ @github/codeql-vscode-reviewers
-/docs/ql-language-reference/ @github/codeql-frontend-reviewers
+/docs/codeql/codeql-cli/ @github/codeql-cli-reviewers
+/docs/codeql/codeql-for-visual-studio-code/ @github/codeql-vscode-reviewers
+/docs/codeql/ql-language-reference/ @github/codeql-frontend-reviewers
 /docs/query-*-style-guide.md @github/codeql-analysis-reviewers
+
+# QL for QL reviewers
+/ql/ @github/codeql-ql-for-ql-reviewers
+
+# Bazel (excluding BUILD.bazel files)
+MODULE.bazel @github/codeql-ci-reviewers
+.bazelversion @github/codeql-ci-reviewers
+.bazelrc @github/codeql-ci-reviewers
+**/*.bzl @github/codeql-ci-reviewers
+
+# Documentation etc
+/*.md @github/code-scanning-product
+/LICENSE @github/code-scanning-product
+
+# Workflows
+/.github/workflows/ @github/codeql-ci-reviewers
+/.github/workflows/go-* @github/codeql-go
+/.github/workflows/ql-for-ql-* @github/codeql-ql-for-ql-reviewers
+/.github/workflows/ruby-* @github/codeql-ruby
+/.github/workflows/swift.yml @github/codeql-swift
+
+# Misc
+/misc/scripts/accept-expected-changes-from-ci.py @RasmusWL
+/misc/scripts/generate-code-scanning-query-list.py @RasmusWL
+
+# .devcontainer
+/.devcontainer/ @github/codeql-ci-reviewers

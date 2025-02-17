@@ -6,19 +6,17 @@
  * Provides classes for working with static single assignment (SSA) form.
  */
 module Ssa {
-  private import codeql.Locations
   private import codeql.ruby.CFG
   private import codeql.ruby.ast.Variable
-  private import internal.SsaImplCommon as SsaImplCommon
   private import internal.SsaImpl as SsaImpl
   private import CfgNodes::ExprNodes
 
   /** A static single assignment (SSA) definition. */
-  class Definition extends SsaImplCommon::Definition {
+  class Definition extends SsaImpl::Definition {
     /**
      * Gets the control flow node of this SSA definition, if any. Phi nodes are
      * examples of SSA definitions without a control flow node, as they are
-     * modelled at index `-1` in the relevant basic block.
+     * modeled at index `-1` in the relevant basic block.
      */
     final CfgNode getControlFlowNode() {
       exists(BasicBlock bb, int i | this.definesAt(_, bb, i) | result = bb.getNode(i))
@@ -104,7 +102,7 @@ module Ssa {
      * end
      * ```
      */
-    final VariableReadAccessCfgNode getALastRead() { SsaImpl::lastRead(this, result) }
+    deprecated final VariableReadAccessCfgNode getALastRead() { SsaImpl::lastRead(this, result) }
 
     /**
      * Holds if `read1` and `read2` are adjacent reads of this SSA definition.
@@ -178,8 +176,8 @@ module Ssa {
 
     override string toString() { result = this.getControlFlowNode().toString() }
 
-    /** Gets the location of this SSA definition. */
-    Location getLocation() { result = this.getControlFlowNode().getLocation() }
+    /** Gets the scope of this SSA definition. */
+    CfgScope getScope() { result = this.getBasicBlock().getScope() }
   }
 
   /**
@@ -190,8 +188,8 @@ module Ssa {
    * puts x
    * ```
    */
-  class WriteDefinition extends Definition, SsaImplCommon::WriteDefinition {
-    private VariableWriteAccess write;
+  class WriteDefinition extends Definition, SsaImpl::WriteDefinition {
+    private VariableWriteAccessCfgNode write;
 
     WriteDefinition() {
       exists(BasicBlock bb, int i, Variable v |
@@ -201,11 +199,20 @@ module Ssa {
     }
 
     /** Gets the underlying write access. */
-    final VariableWriteAccess getWriteAccess() { result = write }
+    final VariableWriteAccessCfgNode getWriteAccess() { result = write }
 
     /**
-     * Holds if this SSA definition represents a direct assignment of `value`
-     * to the underlying variable.
+     * Holds if this SSA definition assigns `value` to the underlying variable.
+     *
+     * This is either a direct assignment, `x = value`, or an assignment via
+     * simple pattern matching
+     *
+     * ```rb
+     * case value
+     *  in Foo => x then ...
+     *  in y => then ...
+     * end
+     * ```
      */
     predicate assigns(CfgNodes::ExprCfgNode value) {
       exists(CfgNodes::ExprNodes::AssignExprCfgNode a, BasicBlock bb, int i |
@@ -213,17 +220,25 @@ module Ssa {
         a = bb.getNode(i) and
         value = a.getRhs()
       )
+      or
+      exists(CfgNodes::ExprNodes::CaseExprCfgNode case, CfgNodes::AstCfgNode pattern |
+        case.getValue() = value and
+        pattern = case.getBranch(_).(CfgNodes::ExprNodes::InClauseCfgNode).getPattern()
+      |
+        this.getWriteAccess() =
+          [pattern, pattern.(CfgNodes::ExprNodes::AsPatternCfgNode).getVariableAccess()]
+      )
     }
 
-    final override string toString() { result = Definition.super.toString() }
+    final override string toString() { result = write.toString() }
 
-    final override Location getLocation() { result = this.getControlFlowNode().getLocation() }
+    final override Location getLocation() { result = write.getLocation() }
   }
 
   /**
    * An SSA definition that corresponds to the value of `self` upon entry to a method, class or module.
    */
-  class SelfDefinition extends Definition, SsaImplCommon::WriteDefinition {
+  class SelfDefinition extends Definition, SsaImpl::WriteDefinition {
     private SelfVariable v;
 
     SelfDefinition() {
@@ -232,6 +247,8 @@ module Ssa {
         not SsaImpl::capturedEntryWrite(bb, i, v)
       )
     }
+
+    override SelfVariable getSourceVariable() { result = v }
 
     final override string toString() { result = "self (" + v.getDeclaringScope() + ")" }
 
@@ -252,15 +269,17 @@ module Ssa {
    * since the assignment to `x` is conditional, an unitialized definition for
    * `x` is inserted at the start of `m`.
    */
-  class UninitializedDefinition extends Definition, SsaImplCommon::WriteDefinition {
+  class UninitializedDefinition extends Definition, SsaImpl::WriteDefinition {
+    private Variable v;
+
     UninitializedDefinition() {
-      exists(BasicBlock bb, int i, Variable v |
+      exists(BasicBlock bb, int i |
         this.definesAt(v, bb, i) and
         SsaImpl::uninitializedWrite(bb, i, v)
       )
     }
 
-    final override string toString() { result = "<uninitialized>" }
+    final override string toString() { result = "<uninitialized> " + v }
 
     final override Location getLocation() { result = this.getBasicBlock().getLocation() }
   }
@@ -281,7 +300,7 @@ module Ssa {
    *
    * an entry definition for `y` is inserted at the start of the `do` block.
    */
-  class CapturedEntryDefinition extends Definition, SsaImplCommon::WriteDefinition {
+  class CapturedEntryDefinition extends Definition, SsaImpl::WriteDefinition {
     CapturedEntryDefinition() {
       exists(BasicBlock bb, int i, Variable v |
         this.definesAt(v, bb, i) and
@@ -289,9 +308,27 @@ module Ssa {
       )
     }
 
-    final override string toString() { result = "<captured>" }
+    final override string toString() { result = "<captured entry> " + this.getSourceVariable() }
 
     override Location getLocation() { result = this.getBasicBlock().getLocation() }
+  }
+
+  /**
+   * An SSA definition inserted at the beginning of a scope to represent a captured `self` variable.
+   * For example, in
+   *
+   * ```rb
+   * def m(x)
+   *   x.tap do |x|
+   *     foo(x)
+   *   end
+   * end
+   * ```
+   *
+   * an entry definition for `self` is inserted at the start of the `do` block.
+   */
+  class CapturedSelfDefinition extends CapturedEntryDefinition {
+    CapturedSelfDefinition() { this.getSourceVariable() instanceof SelfVariable }
   }
 
   /**
@@ -310,11 +347,11 @@ module Ssa {
    *
    * a definition for `y` is inserted at the call to `times`.
    */
-  class CapturedCallDefinition extends Definition, SsaImplCommon::UncertainWriteDefinition {
+  class CapturedCallDefinition extends Definition, SsaImpl::UncertainWriteDefinition {
     CapturedCallDefinition() {
       exists(Variable v, BasicBlock bb, int i |
         this.definesAt(v, bb, i) and
-        SsaImpl::capturedCallWrite(bb, i, v)
+        SsaImpl::capturedCallWrite(_, bb, i, v)
       )
     }
 
@@ -324,7 +361,7 @@ module Ssa {
      */
     final Definition getPriorDefinition() { result = SsaImpl::uncertainWriteDefinitionInput(this) }
 
-    override string toString() { result = this.getControlFlowNode().toString() }
+    override string toString() { result = "<captured exit> " + this.getSourceVariable() }
   }
 
   /**
@@ -341,7 +378,7 @@ module Ssa {
    *
    * a phi node for `x` is inserted just before the call `puts x`.
    */
-  class PhiNode extends Definition, SsaImplCommon::PhiNode {
+  class PhiNode extends Definition, SsaImpl::PhiNode {
     /**
      * Gets an input of this phi node.
      *

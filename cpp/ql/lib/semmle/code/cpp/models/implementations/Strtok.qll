@@ -5,7 +5,6 @@
 
 import semmle.code.cpp.Function
 import semmle.code.cpp.models.interfaces.ArrayFunction
-import semmle.code.cpp.models.interfaces.ArrayFunction
 import semmle.code.cpp.models.interfaces.Alias
 import semmle.code.cpp.models.interfaces.SideEffect
 import semmle.code.cpp.models.interfaces.Taint
@@ -33,6 +32,8 @@ private class Strtok extends ArrayFunction, AliasFunction, TaintFunction, SideEf
 
   override predicate hasTaintFlow(FunctionInput input, FunctionOutput output) {
     input.isParameter(0) and output.isReturnValue()
+    or
+    input.isParameterDeref(0) and output.isReturnValueDeref()
   }
 
   override predicate hasOnlySpecificReadSideEffects() { none() }

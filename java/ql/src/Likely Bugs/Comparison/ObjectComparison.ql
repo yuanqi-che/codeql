@@ -19,7 +19,7 @@ class FinalFieldAccess extends VarAccess {
   FinalFieldAccess() { this.getVariable().(Field).isFinal() }
 }
 
-class ReferenceEqualityTestOnObject extends EqualityTest {
+class ReferenceEqualityTestOnObject extends ReferenceEqualityTest {
   ReferenceEqualityTestOnObject() {
     this.getLeftOperand().getType() instanceof TypeObject and
     this.getRightOperand().getType() instanceof TypeObject and
@@ -30,7 +30,7 @@ class ReferenceEqualityTestOnObject extends EqualityTest {
 
 from ReferenceEqualityTestOnObject scw
 where
-  not exists(Variable left, Variable right, MethodAccess equals |
+  not exists(Variable left, Variable right, MethodCall equals |
     left = scw.getLeftOperand().(VarAccess).getVariable() and
     right = scw.getRightOperand().(VarAccess).getVariable() and
     scw.getEnclosingCallable() = equals.getEnclosingCallable() and

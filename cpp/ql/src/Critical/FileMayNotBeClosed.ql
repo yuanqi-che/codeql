@@ -118,7 +118,7 @@ class FOpenReachability extends StackVariableReachabilityExt {
   override predicate isBarrier(
     ControlFlowNode source, ControlFlowNode node, ControlFlowNode next, StackVariable v
   ) {
-    isSource(source, v) and
+    this.isSource(source, v) and
     next = node.getASuccessor() and
     // the file (stored in any variable `v0`) opened at `source` is closed or
     // assigned to a global at node, or NULL checked on the edge node -> next.
@@ -164,4 +164,4 @@ where
     fopenVariableReaches(v, def, ret) and
     ret.getAChild*() = v.getAnAccess()
   )
-select def, "The file opened here may not be closed at $@.", ret, "this exit point"
+select def, "This file may not be closed at $@.", ret, "this exit point"

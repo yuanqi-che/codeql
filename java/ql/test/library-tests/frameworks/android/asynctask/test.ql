@@ -1,6 +1,4 @@
 import java
-import TestUtilities.InlineFlowTest
-
-class AsyncTaskTest extends InlineFlowTest {
-  override TaintTracking::Configuration getTaintFlowConfig() { none() }
-}
+import utils.test.InlineFlowTest
+import DefaultFlowTest
+import TaintFlow::PathGraph

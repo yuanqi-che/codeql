@@ -4,6 +4,7 @@ module Private {
   private import semmle.code.java.dataflow.RangeUtils as RU
   private import semmle.code.java.controlflow.Guards as G
   private import semmle.code.java.controlflow.BasicBlocks as BB
+  private import semmle.code.java.controlflow.internal.GuardsLogic as GL
   private import SsaReadPositionCommon
 
   class BasicBlock = BB::BasicBlock;
@@ -72,13 +73,13 @@ module Private {
   }
 
   /** A left shift or an assign-lshift expression. */
-  class LShiftExpr extends J::Expr {
-    LShiftExpr() { this instanceof J::LShiftExpr or this instanceof J::AssignLShiftExpr }
+  class LeftShiftExpr extends J::Expr {
+    LeftShiftExpr() { this instanceof J::LeftShiftExpr or this instanceof J::AssignLeftShiftExpr }
 
     /** Gets the RHS operand of this shift. */
     Expr getRhs() {
-      result = this.(J::LShiftExpr).getRightOperand() or
-      result = this.(J::AssignLShiftExpr).getRhs()
+      result = this.(J::LeftShiftExpr).getRightOperand() or
+      result = this.(J::AssignLeftShiftExpr).getRhs()
     }
   }
 
@@ -100,9 +101,31 @@ module Private {
     }
   }
 
-  predicate guardDirectlyControlsSsaRead = RU::guardDirectlyControlsSsaRead/3;
+  /**
+   * Holds if `guard` directly controls the position `controlled` with the
+   * value `testIsTrue`.
+   */
+  pragma[nomagic]
+  predicate guardDirectlyControlsSsaRead(Guard guard, SsaReadPosition controlled, boolean testIsTrue) {
+    guard.directlyControls(controlled.(SsaReadPositionBlock).getBlock(), testIsTrue)
+    or
+    exists(SsaReadPositionPhiInputEdge controlledEdge | controlledEdge = controlled |
+      guard.directlyControls(controlledEdge.getOrigBlock(), testIsTrue) or
+      guard.hasBranchEdge(controlledEdge.getOrigBlock(), controlledEdge.getPhiBlock(), testIsTrue)
+    )
+  }
 
-  predicate guardControlsSsaRead = RU::guardControlsSsaRead/3;
+  /**
+   * Holds if `guard` controls the position `controlled` with the value `testIsTrue`.
+   */
+  predicate guardControlsSsaRead(Guard guard, SsaReadPosition controlled, boolean testIsTrue) {
+    guardDirectlyControlsSsaRead(guard, controlled, testIsTrue)
+    or
+    exists(Guard guard0, boolean testIsTrue0 |
+      GL::implies_v2(guard0, testIsTrue0, guard, testIsTrue) and
+      guardControlsSsaRead(guard0, controlled, testIsTrue0)
+    )
+  }
 
   predicate valueFlowStep = RU::valueFlowStep/3;
 
@@ -110,25 +133,5 @@ module Private {
 
   predicate ssaUpdateStep = RU::ssaUpdateStep/3;
 
-  Expr getABasicBlockExpr(BasicBlock bb) { result = bb.getANode() }
-
-  private predicate id(BasicBlock x, BasicBlock y) { x = y }
-
-  private predicate idOf(BasicBlock x, int y) = equivalenceRelation(id/2)(x, y)
-
-  private int getId(BasicBlock bb) { idOf(bb, result) }
-
-  /**
-   * Holds if `inp` is an input to `phi` along `edge` and this input has index `r`
-   * in an arbitrary 1-based numbering of the input edges to `phi`.
-   */
-  predicate rankedPhiInput(SsaPhiNode phi, SsaVariable inp, SsaReadPositionPhiInputEdge edge, int r) {
-    edge.phiInput(phi, inp) and
-    edge =
-      rank[r](SsaReadPositionPhiInputEdge e |
-        e.phiInput(phi, _)
-      |
-        e order by getId(e.getOrigBlock())
-      )
-  }
+  Expr getABasicBlockExpr(BasicBlock bb) { result = bb.getANode().asExpr() }
 }

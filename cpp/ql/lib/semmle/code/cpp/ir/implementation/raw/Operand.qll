@@ -18,7 +18,7 @@ private import internal.OperandInternal
  * of `TOperand` that are used in this stage.
  */
 private class TStageOperand =
-  TRegisterOperand or TNonSSAMemoryOperand or TPhiOperand or TChiOperand;
+  TRegisterOperand or TNonSsaMemoryOperand or TPhiOperand or TChiOperand;
 
 /**
  * A known location. Testing `loc instanceof KnownLocation` will account for non existing locations, as
@@ -38,14 +38,14 @@ class Operand extends TStageOperand {
     // Ensure that the operand does not refer to instructions from earlier stages that are unreachable here
     exists(Instruction use, Instruction def | this = registerOperand(use, _, def))
     or
-    exists(Instruction use | this = nonSSAMemoryOperand(use, _))
+    exists(Instruction use | this = nonSsaMemoryOperand(use, _))
     or
     exists(Instruction use, Instruction def, IRBlock predecessorBlock |
       this = phiOperand(use, def, predecessorBlock, _) or
       this = reusedPhiOperand(use, def, predecessorBlock, _)
     )
     or
-    exists(Instruction use | this = chiOperand(use, _))
+    this = chiOperand(_, _)
   }
 
   /** Gets a textual representation of this element. */
@@ -86,22 +86,6 @@ class Operand extends TStageOperand {
     result = this.getAnyDef() and
     this.getDefinitionOverlap() instanceof MustExactlyOverlap
   }
-
-  /**
-   * DEPRECATED: renamed to `getUse`.
-   *
-   * Gets the `Instruction` that consumes this operand.
-   */
-  deprecated final Instruction getUseInstruction() { result = this.getUse() }
-
-  /**
-   * DEPRECATED: use `getAnyDef` or `getDef`. The exact replacement for this
-   * predicate is `getAnyDef`, but most uses of this predicate should probably
-   * be replaced with `getDef`.
-   *
-   * Gets the `Instruction` whose result is the value of the operand.
-   */
-  deprecated final Instruction getDefinitionInstruction() { result = this.getAnyDef() }
 
   /**
    * Gets the overlap relationship between the operand's definition and its use.
@@ -209,7 +193,7 @@ class Operand extends TStageOperand {
 class MemoryOperand extends Operand {
   cached
   MemoryOperand() {
-    this instanceof TNonSSAMemoryOperand or
+    this instanceof TNonSsaMemoryOperand or
     this instanceof TPhiOperand or
     this instanceof TChiOperand
   }
@@ -249,7 +233,7 @@ class NonPhiOperand extends Operand {
 
   NonPhiOperand() {
     this = registerOperand(useInstr, tag, _) or
-    this = nonSSAMemoryOperand(useInstr, tag) or
+    this = nonSsaMemoryOperand(useInstr, tag) or
     this = chiOperand(useInstr, tag)
   }
 
@@ -299,7 +283,7 @@ class NonPhiMemoryOperand extends NonPhiOperand, MemoryOperand, TNonPhiMemoryOpe
 
   cached
   NonPhiMemoryOperand() {
-    this = nonSSAMemoryOperand(useInstr, tag)
+    this = nonSsaMemoryOperand(useInstr, tag)
     or
     this = chiOperand(useInstr, tag)
   }
@@ -412,6 +396,9 @@ class CallTargetOperand extends RegisterOperand {
  */
 class ArgumentOperand extends RegisterOperand {
   override ArgumentOperandTag tag;
+
+  /** Gets the `CallInstruction` for which this is an argument. */
+  CallInstruction getCall() { result.getAnArgumentOperand() = this }
 }
 
 /**

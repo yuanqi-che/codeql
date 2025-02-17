@@ -3,7 +3,7 @@
  */
 
 private import javascript
-private import semmle.javascript.security.dataflow.Xss
+private import semmle.javascript.security.dataflow.DomBasedXssCustomizations
 private import semmle.javascript.security.dataflow.ClientSideUrlRedirectCustomizations
 private import semmle.javascript.security.dataflow.CodeInjectionCustomizations
 
@@ -14,12 +14,10 @@ module TrustedTypes {
   private class TrustedTypesEntry extends API::EntryPoint {
     TrustedTypesEntry() { this = "TrustedTypesEntry" }
 
-    override DataFlow::SourceNode getAUse() { result = DataFlow::globalVarRef("trustedTypes") }
-
-    override DataFlow::Node getARhs() { none() }
+    override DataFlow::SourceNode getASource() { result = DataFlow::globalVarRef("trustedTypes") }
   }
 
-  private API::Node trustedTypesObj() { result = any(TrustedTypesEntry entry).getNode() }
+  private API::Node trustedTypesObj() { result = any(TrustedTypesEntry entry).getANode() }
 
   /** A call to `trustedTypes.createPolicy`. */
   class PolicyCreation extends API::CallNode {
@@ -27,8 +25,7 @@ module TrustedTypes {
 
     /** Gets the function passed as the given option. */
     DataFlow::FunctionNode getPolicyCallback(string method) {
-      // Require local callback to avoid potential call/return mismatch in the uses below
-      result = getOptionArgument(1, method).getALocalSource()
+      result = this.getParameter(1).getMember(method).getAValueReachingSink()
     }
   }
 
@@ -38,7 +35,7 @@ module TrustedTypes {
   private class PolicyInputStep extends DataFlow::SharedFlowStep {
     override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
       exists(PolicyCreation policy, string method |
-        pred = policy.getReturn().getMember(method).getParameter(0).getARhs() and
+        pred = policy.getReturn().getMember(method).getParameter(0).asSink() and
         succ = policy.getPolicyCallback(method).getParameter(0)
       )
     }

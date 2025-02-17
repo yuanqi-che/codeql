@@ -1,6 +1,7 @@
 private import codeql.ruby.AST
 private import codeql.ruby.CFG
 private import internal.AST
+private import internal.Constant
 private import internal.Expr
 private import internal.TreeSitter
 
@@ -10,26 +11,8 @@ private import internal.TreeSitter
  * This is the root QL class for all expressions.
  */
 class Expr extends Stmt, TExpr {
-  /** Gets the textual (constant) value of this expression, if any. */
-  string getValueText() {
-    forex(CfgNodes::ExprCfgNode n | n = this.getAControlFlowNode() | result = n.getValueText())
-  }
-}
-
-/**
- * A reference to the current object. For example:
- * - `self == other`
- * - `self.method_name`
- * - `def self.method_name ... end`
- *
- * This also includes implicit references to the current object in method
- * calls.  For example, the method call `foo(123)` has an implicit `self`
- * receiver, and is equivalent to the explicit `self.foo(123)`.
- */
-class Self extends Expr, TSelf {
-  final override string getAPrimaryQlClass() { result = "Self" }
-
-  final override string toString() { result = "self" }
+  /** Gets the constant value of this expression, if any. */
+  ConstantValue getConstantValue() { result = getConstantValueExpr(this) }
 }
 
 /**
@@ -68,7 +51,7 @@ class ArgumentList extends Expr, TArgumentList {
 
 private class LhsExpr_ =
   TVariableAccess or TTokenConstantAccess or TScopeResolutionConstantAccess or TMethodCall or
-      TDestructuredLhsExpr;
+      TDestructuredLhsExpr or TConstantWriteAccessSynth;
 
 /**
  * A "left-hand-side" (LHS) expression. An `LhsExpr` can occur on the left-hand side of
@@ -214,6 +197,7 @@ class BodyStmt extends StmtSequence, TBodyStmt {
     result = unique(Ensure s | toGenerated(s) = getBodyStmtChild(this, _))
   }
 
+  /** Holds if this block has an `ensure` block. */
   final predicate hasEnsure() { exists(this.getEnsure()) }
 
   override AstNode getAChild(string pred) {
@@ -285,13 +269,16 @@ class Pair extends Expr, TPair {
   final Expr getKey() { toGenerated(result) = g.getKey() }
 
   /**
-   * Gets the value expression of this pair. For example, the `InteralLiteral`
+   * Gets the value expression of this pair. For example, the `IntegerLiteral`
    * 123 in the following hash pair:
    * ```rb
    * { 'foo' => 123 }
    * ```
    */
-  final Expr getValue() { toGenerated(result) = g.getValue() }
+  final Expr getValue() {
+    toGenerated(result) = g.getValue() or
+    synthChild(this, 0, result)
+  }
 
   final override string toString() { result = "Pair" }
 
@@ -456,10 +443,12 @@ class StringConcatenation extends Expr, TStringConcatenation {
    * ```
    */
   final string getConcatenatedValueText() {
-    forall(StringLiteral c | c = this.getString(_) | exists(c.getValueText())) and
+    forall(StringLiteral c | c = this.getString(_) |
+      exists(c.getConstantValue().getStringlikeValue())
+    ) and
     result =
       concat(string valueText, int i |
-        valueText = this.getString(i).getValueText()
+        valueText = this.getString(i).getConstantValue().getStringlikeValue()
       |
         valueText order by i
       )

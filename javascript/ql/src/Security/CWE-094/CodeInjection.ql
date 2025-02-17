@@ -16,10 +16,9 @@
 
 import javascript
 import semmle.javascript.security.dataflow.CodeInjectionQuery
-import DataFlow::PathGraph
+import CodeInjectionFlow::PathGraph
 
-from Configuration cfg, DataFlow::PathNode source, DataFlow::PathNode sink
-where cfg.hasFlowPath(source, sink)
-select sink.getNode(), source, sink,
-  "$@ flows to " + sink.getNode().(Sink).getMessageSuffix() + ".", source.getNode(),
-  "User-provided value"
+from CodeInjectionFlow::PathNode source, CodeInjectionFlow::PathNode sink
+where CodeInjectionFlow::flowPath(source, sink)
+select sink.getNode(), source, sink, sink.getNode().(Sink).getMessagePrefix() + " depends on a $@.",
+  source.getNode(), "user-provided value"

@@ -18,11 +18,11 @@ class RunMethod extends Method {
   RunMethod() {
     this.hasName("run") and
     this.hasNoParameters() and
-    this.getDeclaringType().getASupertype*().hasQualifiedName("java.lang", "Thread")
+    this.getDeclaringType().getAnAncestor().hasQualifiedName("java.lang", "Thread")
   }
 }
 
-from MethodAccess m, RunMethod run
+from MethodCall m, RunMethod run
 where
   m.getMethod() = run and
   not m.getEnclosingCallable() instanceof RunMethod

@@ -100,12 +100,12 @@ As a consequence, ``A != B`` has a very different meaning to the :ref:`negation 
       - ``1 = [1 .. 2]`` holds, because ``1 = 1``.
       - ``not 1 = [1 .. 2]`` doesn't hold, because there is a common value (``1``).
 
-#. Compare ``1`` and ``none()`` (the "empty set"):
-      - ``1 != none()`` doesn't hold, because there are no values in ``none()``, so no values
+#. Compare ``1`` and ``int empty() { none() }`` (a predicate defining the empty set of integers):
+      - ``1 != empty()`` doesn't hold, because there are no values in ``empty()``, so no values
         that are not equal to ``1``.
-      - ``1 = none()`` also doesn't hold, because there are no values in ``none()``, so no values
+      - ``1 = empty()`` also doesn't hold, because there are no values in ``empty()``, so no values
         that are equal to ``1``.
-      - ``not 1 = none()`` holds, because there are no common values.
+      - ``not 1 = empty()`` holds, because there are no common values.
 
 .. index:: instanceof
 .. _type-checks:
@@ -154,7 +154,7 @@ For example, ``isThree(x)`` might be a call to a predicate that holds if the arg
 
 A call to a predicate can also contain a closure operator, namely ``*`` or ``+``. For example,
 ``a.isChildOf+(b)`` is a call to the :ref:`transitive closure <transitive-closures>` of 
-``isChildOf()``, so it holds if ``a`` is a descendent of ``b``. 
+``isChildOf()``, so it holds if ``a`` is a descendant of ``b``.
 
 The predicate reference must resolve to exactly one predicate. For more information about how a predicate 
 reference is resolved, see ":ref:`name-resolution`." 
@@ -163,6 +163,38 @@ If the call resolves to a predicate without result, then the call is a formula.
 
 It is also possible to call a predicate with result. This kind of call is an
 expression in QL, instead of a formula. For more information, see ":ref:`calls-with-result`."
+
+Member predicates only apply to members of a particular class and calls to
+member predicates have a receiver of a matching type. Syntactically, if a call
+contains a dot, then the expression before the dot specifies the receiver of
+the call. For instance, ``x`` is the receiver for the call ``x.isEven()``.
+
+For calls to member predicates of the enclosing class on the member itself
+(i.e., the value of ``this``), the receiver may be omitted syntactically. In
+this case we say the call has an implicit this receiver. For instance, in the
+following example the ``isEven()`` call in ``isOdd()`` is a member predicate
+call with an implicit this receiver and the call is equivalent to
+``this.isEven()``:
+
+.. code-block:: ql
+
+  class OneTwoThree extends int {
+    OneTwoThree() { this = 1 or this = 2 or this = 3 }
+
+    predicate isEven() { this = 2 }
+
+    predicate isOdd() { not isEven() }
+  }
+
+Use of implicit this receivers can make it harder to spot predicates that introduce
+cartesian products by failing to relate the implicit ``this`` variable with
+other variables, which can negatively affect query performance. For more
+information on cartesian products, see ":ref:`Troubleshooting query performance
+<troubleshooting-query-performance>`".
+
+It is possible to enable warnings about implicit this receivers for `CodeQL packs
+<https://docs.github.com/en/code-security/codeql-cli/codeql-cli-reference/about-codeql-packs#warnonimplicitthis>`__
+through the ``warnOnImplicitThis`` property.
 
 .. _parenthesized-formulas:
 
@@ -295,8 +327,47 @@ necessary, since they highlight the default precedence. You usually only add par
 override the default precedence, but you can also add them to make your code easier to read
 (even if they aren't required).
 
+QL also has two nullary connectives indicating the always true formula,
+``any()``, and the always false formula, ``none()``.
+
 The logical connectives in QL work similarly to Boolean connectives in other programming
 languages. Here is a brief overview:
+
+.. index:: any, true
+.. _true:
+
+``any()``
+=========
+
+The built-in predicate ``any()`` is a formula that always holds.
+
+**Example**
+
+The following predicate defines the set of all expressions.
+
+.. code-block:: ql
+
+    Expr allExpressions() {
+      any()
+    }
+
+.. index:: none, false
+.. _false:
+
+``none()``
+==========
+
+The built-in predicate ``none()`` is a formula that never holds.
+
+**Example**
+
+The following predicate defines the empty set of integers.
+
+.. code-block:: ql
+
+    int emptySet() {
+      none()
+    }
 
 .. index:: not, negation
 .. _negation:

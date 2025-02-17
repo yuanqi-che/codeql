@@ -8,13 +8,6 @@ import javascript
  */
 class NamespaceDefinition extends Stmt, @namespace_definition, AST::ValueNode {
   /**
-   * DEPRECATED: Use `getIdentifier()` instead.
-   *
-   * Gets the identifier naming the namespace.
-   */
-  deprecated Identifier getId() { result = this.getIdentifier() }
-
-  /**
    * Gets the identifier naming the namespace.
    */
   Identifier getIdentifier() { none() } // Overridden in subtypes.
@@ -98,7 +91,7 @@ class NamespaceDeclaration extends NamespaceDefinition, StmtContainer, @namespac
  * Note that imports and type parameters are not type definitions.  Consider using `TypeDecl` to capture
  * a wider class of type declarations.
  */
-class TypeDefinition extends ASTNode, @type_definition {
+class TypeDefinition extends AstNode, @type_definition {
   /**
    * Gets the identifier naming the type.
    */
@@ -189,13 +182,6 @@ class GlobalAugmentationDeclaration extends Stmt, StmtContainer, @global_augment
 
 /** A TypeScript "import-equals" declaration. */
 class ImportEqualsDeclaration extends Stmt, @import_equals_declaration {
-  /**
-   * DEPRECATED: Use `getIdentifier()` instead.
-   *
-   * Gets the name under which the imported entity is imported.
-   */
-  deprecated Identifier getId() { result = this.getIdentifier() }
-
   /** Gets the name under which the imported entity is imported. */
   Identifier getIdentifier() { result = this.getChildExpr(0) }
 
@@ -376,7 +362,7 @@ class ConstructorTypeExpr extends FunctionTypeExpr, @constructor_typeexpr { }
 class PlainFunctionTypeExpr extends FunctionTypeExpr, @plain_function_typeexpr { }
 
 /** A possibly qualified identifier that declares or refers to a type. */
-abstract class TypeRef extends ASTNode { }
+abstract class TypeRef extends AstNode { }
 
 /** An identifier declaring a type name, that is, the name of a class, interface, type parameter, or import. */
 class TypeDecl extends Identifier, TypeRef, LexicalDecl {
@@ -751,7 +737,7 @@ class TypeAccess extends @typeaccess, TypeExpr, TypeRef {
 }
 
 /**
- * Gets a suitable name for the library imported by `import`.
+ * Gets a suitable name for the library imported by `imprt`.
  *
  * For relative imports, this is the snapshot-relative path to the imported module.
  * For non-relative imports, it is the import path itself.
@@ -896,21 +882,28 @@ class ArrayTypeExpr extends @array_typeexpr, TypeExpr {
   override string getAPrimaryQlClass() { result = "ArrayTypeExpr" }
 }
 
+private class RawUnionOrIntersectionTypeExpr = @union_typeexpr or @intersection_typeexpr;
+
 /**
- * A union type, such as `string|number|boolean`.
+ * A union or intersection type, such as `string|number|boolean` or `A & B`.
  */
-class UnionTypeExpr extends @union_typeexpr, TypeExpr {
-  /** Gets the `n`th type in the union, starting at 0. */
+class UnionOrIntersectionTypeExpr extends RawUnionOrIntersectionTypeExpr, TypeExpr {
+  /** Gets the `n`th type in the union or intersection, starting at 0. */
   TypeExpr getElementType(int n) { result = this.getChildTypeExpr(n) }
 
-  /** Gets any of the types in the union. */
+  /** Gets any of the types in the union or intersection. */
   TypeExpr getAnElementType() { result = this.getElementType(_) }
 
-  /** Gets the number of types in the union. This is always at least two. */
+  /** Gets the number of types in the union or intersection. This is always at least two. */
   int getNumElementType() { result = count(this.getAnElementType()) }
 
   override TypeExpr getAnUnderlyingType() { result = this.getAnElementType().getAnUnderlyingType() }
+}
 
+/**
+ * A union type, such as `string|number|boolean`.
+ */
+class UnionTypeExpr extends @union_typeexpr, UnionOrIntersectionTypeExpr {
   override string getAPrimaryQlClass() { result = "UnionTypeExpr" }
 }
 
@@ -932,18 +925,7 @@ class IndexedAccessTypeExpr extends @indexed_access_typeexpr, TypeExpr {
  *
  * In general, there are can more than two operands to an intersection type.
  */
-class IntersectionTypeExpr extends @intersection_typeexpr, TypeExpr {
-  /** Gets the `n`th operand of the intersection type, starting at 0. */
-  TypeExpr getElementType(int n) { result = this.getChildTypeExpr(n) }
-
-  /** Gets any of the operands to the intersection type. */
-  TypeExpr getAnElementType() { result = this.getElementType(_) }
-
-  /** Gets the number of operands to the intersection type. This is always at least two. */
-  int getNumElementType() { result = count(this.getAnElementType()) }
-
-  override TypeExpr getAnUnderlyingType() { result = this.getAnElementType().getAnUnderlyingType() }
-
+class IntersectionTypeExpr extends @intersection_typeexpr, UnionOrIntersectionTypeExpr {
   override string getAPrimaryQlClass() { result = "IntersectionTypeExpr" }
 }
 
@@ -1286,12 +1268,14 @@ class ExpressionWithTypeArguments extends @expression_with_type_arguments, Expr 
   override ControlFlowNode getFirstControlFlowNode() {
     result = this.getExpression().getFirstControlFlowNode()
   }
+
+  override string getAPrimaryQlClass() { result = "ExpressionWithTypeArguments" }
 }
 
 /**
  * A program element that supports type parameters, that is, a function, class, interface, type alias, mapped type, or `infer` type.
  */
-class TypeParameterized extends @type_parameterized, ASTNode {
+class TypeParameterized extends @type_parameterized, AstNode {
   /** Gets the `n`th type parameter declared on this function or type. */
   TypeParameter getTypeParameter(int n) { none() } // Overridden in subtypes.
 
@@ -1378,6 +1362,27 @@ class AsTypeAssertion extends TypeAssertion, @as_type_assertion { }
 class PrefixTypeAssertion extends TypeAssertion, @prefix_type_assertion { }
 
 /**
+ * A satisfies type asserion of the form `E satisfies T` where `E` is an expression and `T` is a type.
+ */
+class SatisfiesExpr extends Expr, @satisfies_expr {
+  /** Gets the expression whose type to assert, that is, the `E` in `E as T` or `<T> E`. */
+  Expr getExpression() { result = this.getChildExpr(0) }
+
+  /** Gets the type to cast to, that is, the `T` in `E as T` or `<T> E`. */
+  TypeExpr getTypeAnnotation() { result = this.getChildTypeExpr(1) }
+
+  override ControlFlowNode getFirstControlFlowNode() {
+    result = this.getExpression().getFirstControlFlowNode()
+  }
+
+  override Expr getUnderlyingValue() { result = this.getExpression().getUnderlyingValue() }
+
+  override Expr getUnderlyingReference() { result = this.getExpression().getUnderlyingReference() }
+
+  override string getAPrimaryQlClass() { result = "SatisfiesExpr" }
+}
+
+/**
  * A TypeScript expression of form `E!`, asserting that `E` is not null.
  */
 class NonNullAssertion extends Expr, @non_null_assertion {
@@ -1394,7 +1399,7 @@ class NonNullAssertion extends Expr, @non_null_assertion {
 /**
  * A possibly qualified identifier that refers to or declares a local name for a namespace.
  */
-abstract class NamespaceRef extends ASTNode { }
+abstract class NamespaceRef extends AstNode { }
 
 /**
  * An identifier that declares a local name for a namespace, that is,
@@ -1451,7 +1456,8 @@ class NamespaceAccess extends TypeExpr, NamespaceRef, @namespace_access {
  * An identifier that refers to a namespace from inside a type annotation.
  */
 class LocalNamespaceAccess extends NamespaceAccess, LexicalAccess, Identifier,
-  @local_namespace_access {
+  @local_namespace_access
+{
   override Identifier getIdentifier() { result = this }
 
   /** Gets the local name being accessed. */
@@ -1602,7 +1608,7 @@ class EnumDeclaration extends NamespaceDefinition, @enum_declaration, AST::Value
  * enum Color { red = 1, green, blue }
  * ```
  */
-class EnumMember extends ASTNode, @enum_member {
+class EnumMember extends AstNode, @enum_member {
   /**
    * Gets the name of the enum member, such as `off` in `enum State { on, off }`.
    *
@@ -1644,7 +1650,7 @@ class EnumMember extends ASTNode, @enum_member {
 }
 
 /**
- * Scope induced by an interface declaration, containing the type parameters declared on the interface.
+ * A scope induced by an interface declaration, containing the type parameters declared on the interface.
  *
  * Interfaces that do not declare type parameters have no scope object.
  */
@@ -1653,7 +1659,7 @@ class InterfaceScope extends @interface_scope, Scope {
 }
 
 /**
- * Scope induced by a type alias declaration, containing the type parameters declared the the alias.
+ * A scope induced by a type alias declaration, containing the type parameters declared the the alias.
  *
  * Type aliases that do not declare type parameters have no scope object.
  */
@@ -1662,14 +1668,14 @@ class TypeAliasScope extends @type_alias_scope, Scope {
 }
 
 /**
- * Scope induced by a mapped type expression, containing the type parameter declared as part of the type.
+ * A scope induced by a mapped type expression, containing the type parameter declared as part of the type.
  */
 class MappedTypeScope extends @mapped_type_scope, Scope {
   override string toString() { result = "mapped type scope" }
 }
 
 /**
- * Scope induced by an enum declaration, containing the names of its enum members.
+ * A scope induced by an enum declaration, containing the names of its enum members.
  *
  * Initializers of enum members are resolved in this scope since they can reference
  * previously-defined enum members by their unqualified name.
@@ -1679,7 +1685,7 @@ class EnumScope extends @enum_scope, Scope {
 }
 
 /**
- * Scope induced by a declaration of form `declare module "X" {...}`.
+ * A scope induced by a declaration of form `declare module "X" {...}`.
  */
 class ExternalModuleScope extends @external_module_scope, Scope {
   override string toString() { result = "external module scope" }
@@ -1754,20 +1760,6 @@ class ReferenceImport extends LineComment {
    * Gets the name of the attribute, i.e. "`path`" or "`types`".
    */
   string getAttributeName() { result = attribute }
-
-  /**
-   * DEPRECATED. This is no longer supported.
-   *
-   * Gets the file referenced by this import.
-   */
-  deprecated File getImportedFile() { none() }
-
-  /**
-   * DEPRECATED. This is no longer supported.
-   *
-   * Gets the top-level of the referenced file.
-   */
-  deprecated TopLevel getImportedTopLevel() { none() }
 }
 
 /**
@@ -1852,11 +1844,6 @@ class Type extends @type {
    * Gets the `i`th child of this type.
    */
   Type getChild(int i) { type_child(result, this, i) }
-
-  /**
-   * DEPRECATED. Property lookup on types is no longer supported.
-   */
-  deprecated Type getProperty(string name) { none() }
 
   /**
    * Gets the type of the string index signature on this type,
@@ -1959,21 +1946,6 @@ class Type extends @type {
    * Gets the number of constructor call signatures.
    */
   int getNumConstructorSignature() { result = count(this.getAConstructorSignature()) }
-
-  /**
-   * DEPRECATED. Method lookup on types is no longer supported.
-   */
-  deprecated FunctionCallSignatureType getMethod(string name) { none() }
-
-  /**
-   * DEPRECATED. Method lookup on types is no longer supported.
-   */
-  deprecated FunctionCallSignatureType getMethodOverload(string name, int n) { none() }
-
-  /**
-   * DEPRECATED. Method lookup on types is no longer supported.
-   */
-  deprecated FunctionCallSignatureType getAMethodOverload(string name) { none() }
 
   /**
    * Repeatedly unfolds union and intersection types and gets any of the underlying types,
@@ -2637,7 +2609,7 @@ class TypeofType extends Type, @typeof_type {
 }
 
 /**
- * One of two values indicating if a signature is a function or constructor signature.
+ * A value indicating if a signature is a function or constructor signature.
  */
 class SignatureKind extends string {
   SignatureKind() { this = "function" or this = "constructor" }
@@ -2836,12 +2808,7 @@ class ConstructorCallSignatureType extends CallSignatureType, @constructor_signa
 private class PromiseTypeName extends TypeName {
   PromiseTypeName() {
     // The name must suggest it is a promise.
-    exists(string name | name = this.getName() |
-      name.matches("%Promise") or
-      name.matches("%PromiseLike") or
-      name.matches("%Thenable") or
-      name.matches("%Deferred")
-    ) and
+    this.getName().matches(["%Promise", "%PromiseLike", "%Thenable", "%Deferred"]) and
     // The `then` method should take a callback, taking an argument of type `T`.
     exists(TypeReference self, Type thenMethod | self = this.getType() |
       self.getNumTypeArgument() = 1 and

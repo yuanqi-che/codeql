@@ -10,18 +10,6 @@ import javascript
 predicate jquery = JQuery::dollar/0;
 
 /**
- * DEPRECATED. In most cases, `JQuery::Object` should be used instead.
- * Alternatively, if used as a base class, and the intent is to extend the model of
- * jQuery objects with more nodes, extend `JQuery::ObjectSource::Range` instead.
- *
- * An expression that may refer to a jQuery object.
- *
- * Note that this class is an over-approximation: `nd instanceof JQueryObject`
- * may hold for nodes `nd` that cannot, in fact, refer to a jQuery object.
- */
-deprecated class JQueryObject = JQueryObjectInternal;
-
-/**
  * An internal version of `JQueryObject` that may be used to retain
  * backwards compatibility without triggering a deprecation warning.
  */
@@ -78,44 +66,6 @@ private predicate neverReturnsJQuery(string name) {
         .getAnUnderlyingType()
         .hasQualifiedName("jQuery")
   )
-}
-
-/**
- * DEPRECATED. Use `JQuery::MethodCall` instead.
- *
- * A (possibly chained) call to a jQuery method.
- */
-deprecated class JQueryMethodCall extends CallExpr {
-  string name;
-
-  JQueryMethodCall() { name = this.flow().(JQuery::MethodCall).getMethodName() }
-
-  /**
-   * Gets the name of the jQuery method this call invokes.
-   */
-  string getMethodName() { result = name }
-
-  /**
-   * Holds if `e` is an argument that this method may interpret as HTML.
-   *
-   * Note that some jQuery methods decide whether to interpret an argument
-   * as HTML based on its syntactic shape, so this predicate and
-   * `interpretsArgumentAsSelector` below overlap.
-   */
-  predicate interpretsArgumentAsHtml(Expr e) {
-    this.flow().(JQuery::MethodCall).interpretsArgumentAsHtml(e.flow())
-  }
-
-  /**
-   * Holds if `e` is an argument that this method may interpret as a selector.
-   *
-   * Note that some jQuery methods decide whether to interpret an argument
-   * as a selector based on its syntactic shape, so this predicate and
-   * `interpretsArgumentAsHtml` above overlap.
-   */
-  predicate interpretsArgumentAsSelector(Expr e) {
-    this.flow().(JQuery::MethodCall).interpretsArgumentAsSelector(e.flow())
-  }
 }
 
 /**
@@ -284,10 +234,8 @@ private class JQueryAttr3Call extends JQueryAttributeDefinition, @call_expr {
  * the DOM element constructed by `$("<script/>")`.
  */
 private class JQueryChainedElement extends DOM::Element, InvokeExpr {
-  DOM::Element inner;
-
   JQueryChainedElement() {
-    exists(JQuery::MethodCall call | this = call.asExpr() |
+    exists(JQuery::MethodCall call, DOM::Element inner | this = call.asExpr() |
       call.getReceiver().asExpr() = inner and
       defn = inner.getDefinition()
     )
@@ -295,7 +243,7 @@ private class JQueryChainedElement extends DOM::Element, InvokeExpr {
 }
 
 /**
- * Classes and predicates for modelling `ClientRequest`s in JQuery.
+ * Classes and predicates for modeling `ClientRequest`s in JQuery.
  */
 private module JQueryClientRequest {
   /**
@@ -333,7 +281,7 @@ private module JQueryClientRequest {
               .getParameter(0)
         or
         result =
-          getAResponseNodeFromAnXHRObject(this.getOptionArgument([0 .. 1],
+          getAResponseNodeFromAnXhrObject(this.getOptionArgument([0 .. 1],
               any(string method | method = "error" or method = "complete"))
                 .getALocalSource()
                 .(DataFlow::FunctionNode)
@@ -355,18 +303,19 @@ private module JQueryClientRequest {
           .getParameter(0)
     or
     result =
-      getAResponseNodeFromAnXHRObject(request.getAMemberCall("fail").getCallback(0).getParameter(0))
+      getAResponseNodeFromAnXhrObject(request.getAMemberCall("fail").getCallback(0).getParameter(0))
   }
 
   /**
-   * Gets a node refering to the response contained in an `jqXHR` object.
+   * Gets a node referring to the response contained in an `jqXHR` object.
    */
-  private DataFlow::SourceNode getAResponseNodeFromAnXHRObject(DataFlow::SourceNode obj) {
+  private DataFlow::SourceNode getAResponseNodeFromAnXhrObject(DataFlow::SourceNode jqXhr) {
     result =
-      obj.getAPropertyRead(any(string s |
-          s = "responseText" or
-          s = "responseXML"
-        ))
+      jqXhr
+          .getAPropertyRead(any(string s |
+              s = "responseText" or
+              s = "responseXML"
+            ))
   }
 
   /**
@@ -385,12 +334,7 @@ private module JQueryClientRequest {
     string name;
 
     JQueryAjaxShortHand() {
-      (
-        name = "get" or
-        name = "getJSON" or
-        name = "getScript" or
-        name = "post"
-      ) and
+      name = ["get", "getJSON", "getScript", "post"] and
       this = jquery().getAMemberCall(name)
       or
       name = "load" and
@@ -463,11 +407,11 @@ module JQuery {
 
     private class DefaultRange extends Range {
       DefaultRange() {
-        // either a reference to a global variable `$` or `jQuery`
-        this = DataFlow::globalVarRef(any(string jq | jq = "$" or jq = "jQuery"))
+        // either a reference to a global variable `$`, `jQuery`, or `cash`
+        this = DataFlow::globalVarRef(["$", "jQuery", "cash"])
         or
-        // or imported from a module named `jquery` or `zepto`
-        this = DataFlow::moduleImport(["jquery", "zepto"])
+        // or imported from a module named `jquery`, `zepto`, or `cash-dom`
+        this = DataFlow::moduleImport(["jquery", "zepto", "cash-dom"])
         or
         this.hasUnderlyingType("JQueryStatic")
       }
@@ -530,7 +474,7 @@ module JQuery {
     }
   }
 
-  /** A source of jQuery objects from the AST-based `JQueryObject` class. */
+  /** Gets a source of jQuery objects from the AST-based `JQueryObject` class. */
   private DataFlow::SourceNode legacyObjectSource() {
     result = any(JQueryObjectInternal e).flow().getALocalSource()
   }
@@ -596,9 +540,9 @@ module JQuery {
       JQuery::isMethodArgumentInterpretedAsHtml(name) and
       node = this.getAnArgument()
       or
-      // for `$, it's only the first one
+      // for `$, it's only the first one, or an "html" option
       name = "$" and
-      node = this.getArgument(0)
+      node = [this.getArgument(0), this.getOptionArgument(1, "html")]
     }
 
     /**

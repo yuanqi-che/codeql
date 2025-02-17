@@ -1,6 +1,6 @@
 /**
- * @name Uncontrolled data used in network request
- * @description Making a network request with user-controlled data allows for request forgery attacks.
+ * @name Server-side request forgery
+ * @description Making a network request with user-controlled data in the URL allows for request forgery attacks.
  * @kind path-problem
  * @problem.severity error
  * @security-severity 9.1
@@ -10,11 +10,12 @@
  *       external/cwe/cwe-918
  */
 
-import ruby
+import codeql.ruby.AST
 import codeql.ruby.DataFlow
 import codeql.ruby.security.ServerSideRequestForgeryQuery
+import ServerSideRequestForgeryFlow::PathGraph
 
-from Configuration config, DataFlow::PathNode source, DataFlow::PathNode sink
-where config.hasFlowPath(source, sink)
-select sink.getNode(), source, sink, "The URL of this request depends on $@.", source.getNode(),
-  "a user-provided value"
+from ServerSideRequestForgeryFlow::PathNode source, ServerSideRequestForgeryFlow::PathNode sink
+where ServerSideRequestForgeryFlow::flowPath(source, sink)
+select sink.getNode(), source, sink, "The URL of this request depends on a $@.", source.getNode(),
+  "user-provided value"

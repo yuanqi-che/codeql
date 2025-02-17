@@ -4,23 +4,22 @@
  */
 
 import csharp
-private import semmle.code.csharp.dataflow.flowsources.Remote
-private import semmle.code.csharp.dataflow.TaintTracking
+private import semmle.code.csharp.commons.QualifiedName
+private import semmle.code.csharp.security.dataflow.flowsources.FlowSources
 private import semmle.code.csharp.frameworks.System
 private import semmle.code.csharp.dataflow.FlowSummary
 
 /**
  * A callable that is considered a "safe" external API from a security perspective.
  */
-abstract class SafeExternalAPICallable extends Callable { }
+abstract class SafeExternalApiCallable extends Callable { }
 
-private class SummarizedCallableSafe extends SafeExternalAPICallable {
-  SummarizedCallableSafe() { this instanceof SummarizedCallable }
+private class SummarizedCallableSafe extends SafeExternalApiCallable instanceof SummarizedCallable {
 }
 
 /** The default set of "safe" external APIs. */
-private class DefaultSafeExternalAPICallable extends SafeExternalAPICallable {
-  DefaultSafeExternalAPICallable() {
+private class DefaultSafeExternalApiCallable extends SafeExternalApiCallable {
+  DefaultSafeExternalApiCallable() {
     this instanceof EqualsMethod or
     this instanceof IEquatableEqualsMethod or
     this = any(SystemObjectClass s).getEqualsMethod() or
@@ -36,11 +35,11 @@ private class DefaultSafeExternalAPICallable extends SafeExternalAPICallable {
 }
 
 /** A node representing data being passed to an external API. */
-class ExternalAPIDataNode extends DataFlow::Node {
+class ExternalApiDataNode extends DataFlow::Node {
   Call call;
   int i;
 
-  ExternalAPIDataNode() {
+  ExternalApiDataNode() {
     (
       // Argument to call
       this.asExpr() = call.getArgument(i)
@@ -59,7 +58,7 @@ class ExternalAPIDataNode extends DataFlow::Node {
       m.fromSource()
     ) and
     // Not a call to a known safe external API
-    not call.getTarget().getUnboundDeclaration() instanceof SafeExternalAPICallable
+    not call.getTarget().getUnboundDeclaration() instanceof SafeExternalApiCallable
   }
 
   /** Gets the called API callable. */
@@ -68,42 +67,45 @@ class ExternalAPIDataNode extends DataFlow::Node {
   /** Gets the index which is passed untrusted data (where -1 indicates the qualifier). */
   int getIndex() { result = i }
 
-  /** Gets the description of the callable being called. */
-  string getCallableDescription() { result = this.getCallable().getQualifiedName() }
+  /** Holds if the callable being use has name `name` and has qualifier `qualifier`. */
+  predicate hasQualifiedName(string qualifier, string name) {
+    this.getCallable().hasFullyQualifiedName(qualifier, name)
+  }
 }
 
-/** A configuration for tracking flow from `RemoteFlowSource`s to `ExternalAPIDataNode`s. */
-class UntrustedDataToExternalAPIConfig extends TaintTracking::Configuration {
-  UntrustedDataToExternalAPIConfig() { this = "UntrustedDataToExternalAPIConfig" }
+/** A configuration for tracking flow from `ActiveThreatModelSource`s to `ExternalApiDataNode`s. */
+private module RemoteSourceToExternalApiConfig implements DataFlow::ConfigSig {
+  predicate isSource(DataFlow::Node source) { source instanceof ActiveThreatModelSource }
 
-  override predicate isSource(DataFlow::Node source) { source instanceof RemoteFlowSource }
-
-  override predicate isSink(DataFlow::Node sink) { sink instanceof ExternalAPIDataNode }
+  predicate isSink(DataFlow::Node sink) { sink instanceof ExternalApiDataNode }
 }
+
+/** A module for tracking flow from `ActiveThreatModelSource`s to `ExternalApiDataNode`s. */
+module RemoteSourceToExternalApi = TaintTracking::Global<RemoteSourceToExternalApiConfig>;
 
 /** A node representing untrusted data being passed to an external API. */
-class UntrustedExternalAPIDataNode extends ExternalAPIDataNode {
-  private UntrustedDataToExternalAPIConfig c;
-
-  UntrustedExternalAPIDataNode() { c.hasFlow(_, this) }
+class UntrustedExternalApiDataNode extends ExternalApiDataNode {
+  UntrustedExternalApiDataNode() { RemoteSourceToExternalApi::flow(_, this) }
 
   /** Gets a source of untrusted data which is passed to this external API data node. */
-  DataFlow::Node getAnUntrustedSource() { c.hasFlow(result, this) }
+  DataFlow::Node getAnUntrustedSource() { RemoteSourceToExternalApi::flow(result, this) }
 }
 
-private newtype TExternalAPI =
-  TExternalAPIParameter(Callable m, int index) {
-    exists(UntrustedExternalAPIDataNode n |
+/** An external API which is used with untrusted data. */
+private newtype TExternalApi =
+  /** An untrusted API method `m` where untrusted data is passed at `index`. */
+  TExternalApiParameter(Callable m, int index) {
+    exists(UntrustedExternalApiDataNode n |
       m = n.getCallable().getUnboundDeclaration() and
       index = n.getIndex()
     )
   }
 
 /** An external API which is used with untrusted data. */
-class ExternalAPIUsedWithUntrustedData extends TExternalAPI {
+class ExternalApiUsedWithUntrustedData extends TExternalApi {
   /** Gets a possibly untrusted use of this external API. */
-  UntrustedExternalAPIDataNode getUntrustedDataNode() {
-    this = TExternalAPIParameter(result.getCallable().getUnboundDeclaration(), result.getIndex())
+  UntrustedExternalApiDataNode getUntrustedDataNode() {
+    this = TExternalApiParameter(result.getCallable().getUnboundDeclaration(), result.getIndex())
   }
 
   /** Gets the number of untrusted sources used with this external API. */
@@ -113,13 +115,13 @@ class ExternalAPIUsedWithUntrustedData extends TExternalAPI {
 
   /** Gets a textual representation of this element. */
   string toString() {
-    exists(Callable m, int index, string indexString |
+    exists(Callable m, int index, string indexString, string qualifier, string name |
       if index = -1 then indexString = "qualifier" else indexString = "param " + index
     |
-      this = TExternalAPIParameter(m, index) and
+      this = TExternalApiParameter(m, index) and
+      m.getDeclaringType().hasFullyQualifiedName(qualifier, name) and
       result =
-        m.getDeclaringType().getQualifiedName() + "." + m.toStringWithTypes() + " [" + indexString +
-          "]"
+        getQualifiedName(qualifier, name) + "." + m.toStringWithTypes() + " [" + indexString + "]"
     )
   }
 }

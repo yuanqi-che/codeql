@@ -1,95 +1,74 @@
 /** Definitions related to `java.util.stream`. */
 
-import semmle.code.java.dataflow.ExternalFlow
+private import semmle.code.java.dataflow.FlowSummary
 
-private class StreamModel extends SummaryModelCsv {
-  override predicate row(string s) {
-    s =
-      [
-        "java.util.stream;BaseStream;true;iterator;();;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;BaseStream;true;onClose;(Runnable);;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;BaseStream;true;parallel;();;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;BaseStream;true;sequential;();;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;BaseStream;true;spliterator;();;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;BaseStream;true;unordered;();;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;allMatch;(Predicate);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;anyMatch;(Predicate);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;collect;(Supplier,BiConsumer,BiConsumer);;ReturnValue of Argument[0];Parameter[0] of Argument[1];value",
-        "java.util.stream;Stream;true;collect;(Supplier,BiConsumer,BiConsumer);;Parameter[0] of Argument[1];ReturnValue;value",
-        "java.util.stream;Stream;true;collect;(Supplier,BiConsumer,BiConsumer);;Parameter[0] of Argument[1];Parameter[0..1] of Argument[2];value",
-        "java.util.stream;Stream;true;collect;(Supplier,BiConsumer,BiConsumer);;Parameter[0..1] of Argument[2];Parameter[0] of Argument[1];value",
-        "java.util.stream;Stream;true;collect;(Supplier,BiConsumer,BiConsumer);;Element of Argument[-1];Parameter[1] of Argument[1];value",
-        // Missing: collect(Collector<T,A,R> collector)
-        "java.util.stream;Stream;true;concat;(Stream,Stream);;Element of Argument[0..1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;distinct;();;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;dropWhile;(Predicate);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;dropWhile;(Predicate);;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;filter;(Predicate);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;filter;(Predicate);;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;findAny;();;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;findFirst;();;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;flatMap;(Function);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;flatMap;(Function);;Element of ReturnValue of Argument[0];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;flatMapToDouble;(Function);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;flatMapToInt;(Function);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;flatMapToLong;(Function);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;forEach;(Consumer);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;forEachOrdered;(Consumer);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;generate;(Supplier);;ReturnValue of Argument[0];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;iterate;(Object,Predicate,UnaryOperator);;Argument[0];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;iterate;(Object,Predicate,UnaryOperator);;Argument[0];Parameter[0] of Argument[1..2];value",
-        "java.util.stream;Stream;true;iterate;(Object,Predicate,UnaryOperator);;ReturnValue of Argument[2];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;iterate;(Object,Predicate,UnaryOperator);;ReturnValue of Argument[2];Parameter[0] of Argument[1..2];value",
-        "java.util.stream;Stream;true;iterate;(Object,UnaryOperator);;Argument[0];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;iterate;(Object,UnaryOperator);;Argument[0];Parameter[0] of Argument[1];value",
-        "java.util.stream;Stream;true;iterate;(Object,UnaryOperator);;ReturnValue of Argument[1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;iterate;(Object,UnaryOperator);;ReturnValue of Argument[1];Parameter[0] of Argument[1];value",
-        "java.util.stream;Stream;true;limit;(long);;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;map;(Function);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;map;(Function);;ReturnValue of Argument[0];Element of ReturnValue;value",
-        // Missing for mapMulti(BiConsumer) (not currently supported):
-        // Argument[0] of Parameter[1] of Argument[0] -> Element of Parameter[1] of Argument[0]
-        // Element of Parameter[1] of Argument[0] -> Element of ReturnValue
-        "java.util.stream;Stream;true;mapMulti;(BiConsumer);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;mapMultiToDouble;(BiConsumer);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;mapMultiToInt;(BiConsumer);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;mapMultiToLong;(BiConsumer);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;mapToDouble;(ToDoubleFunction);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;mapToInt;(ToIntFunction);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;mapToLong;(ToLongFunction);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;max;(Comparator);;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;max;(Comparator);;Element of Argument[-1];Parameter[0..1] of Argument[0];value",
-        "java.util.stream;Stream;true;min;(Comparator);;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;min;(Comparator);;Element of Argument[-1];Parameter[0..1] of Argument[0];value",
-        "java.util.stream;Stream;true;noneMatch;(Predicate);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;of;(Object);;Argument[0];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;of;(Object[]);;ArrayElement of Argument[0];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;ofNullable;(Object);;Argument[0];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;peek;(Consumer);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;peek;(Consumer);;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;reduce;(BinaryOperator);;Element of Argument[-1];Parameter[0..1] of Argument[0];value",
-        "java.util.stream;Stream;true;reduce;(BinaryOperator);;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;reduce;(BinaryOperator);;ReturnValue of Argument[0];Parameter[0..1] of Argument[0];value",
-        "java.util.stream;Stream;true;reduce;(BinaryOperator);;ReturnValue of Argument[0];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;reduce;(Object,BinaryOperator);;Element of Argument[-1];Parameter[0..1] of Argument[1];value",
-        "java.util.stream;Stream;true;reduce;(Object,BinaryOperator);;Argument[0];Parameter[0..1] of Argument[1];value",
-        "java.util.stream;Stream;true;reduce;(Object,BinaryOperator);;Argument[0];ReturnValue;value",
-        "java.util.stream;Stream;true;reduce;(Object,BinaryOperator);;ReturnValue of Argument[1];Parameter[0..1] of Argument[1];value",
-        "java.util.stream;Stream;true;reduce;(Object,BinaryOperator);;ReturnValue of Argument[1];ReturnValue;value",
-        "java.util.stream;Stream;true;reduce;(Object,BiFunction,BinaryOperator);;Element of Argument[-1];Parameter[1] of Argument[1];value",
-        "java.util.stream;Stream;true;reduce;(Object,BiFunction,BinaryOperator);;Argument[0];Parameter[0] of Argument[1];value",
-        "java.util.stream;Stream;true;reduce;(Object,BiFunction,BinaryOperator);;Argument[0];Parameter[0..1] of Argument[2];value",
-        "java.util.stream;Stream;true;reduce;(Object,BiFunction,BinaryOperator);;Argument[0];ReturnValue;value",
-        "java.util.stream;Stream;true;reduce;(Object,BiFunction,BinaryOperator);;ReturnValue of Argument[1..2];Parameter[0] of Argument[1];value",
-        "java.util.stream;Stream;true;reduce;(Object,BiFunction,BinaryOperator);;ReturnValue of Argument[1..2];Parameter[0..1] of Argument[2];value",
-        "java.util.stream;Stream;true;reduce;(Object,BiFunction,BinaryOperator);;ReturnValue of Argument[1..2];ReturnValue;value",
-        "java.util.stream;Stream;true;skip;(long);;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;sorted;;;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;sorted;(Comparator);;Element of Argument[-1];Parameter[0..1] of Argument[0];value",
-        "java.util.stream;Stream;true;takeWhile;(Predicate);;Element of Argument[-1];Parameter[0] of Argument[0];value",
-        "java.util.stream;Stream;true;takeWhile;(Predicate);;Element of Argument[-1];Element of ReturnValue;value",
-        "java.util.stream;Stream;true;toArray;;;Element of Argument[-1];ArrayElement of ReturnValue;value",
-        "java.util.stream;Stream;true;toList;();;Element of Argument[-1];Element of ReturnValue;value"
-      ]
+private class CollectCall extends MethodCall {
+  CollectCall() {
+    this.getMethod()
+        .getSourceDeclaration()
+        .hasQualifiedName("java.util.stream", "Stream", "collect")
+  }
+}
+
+private class Collector extends MethodCall {
+  Collector() {
+    this.getMethod().getDeclaringType().hasQualifiedName("java.util.stream", "Collectors")
+  }
+
+  predicate hasName(string name) { this.getMethod().hasName(name) }
+}
+
+private class CollectToContainer extends SyntheticCallable {
+  CollectToContainer() { this = "java.util.stream.collect()+Collectors.[toList,...]" }
+
+  override Call getACall() {
+    result
+        .(CollectCall)
+        .getArgument(0)
+        .(Collector)
+        .hasName([
+            "maxBy", "minBy", "toCollection", "toList", "toSet", "toUnmodifiableList",
+            "toUnmodifiableSet"
+          ])
+  }
+
+  override predicate propagatesFlow(string input, string output, boolean preservesValue) {
+    input = "Argument[this].Element" and
+    output = "ReturnValue.Element" and
+    preservesValue = true
+  }
+}
+
+private class CollectToJoining extends SyntheticCallable {
+  CollectToJoining() { this = "java.util.stream.collect()+Collectors.joining" }
+
+  override Call getACall() { result.(CollectCall).getArgument(0).(Collector).hasName("joining") }
+
+  override predicate propagatesFlow(string input, string output, boolean preservesValue) {
+    input = "Argument[this].Element" and
+    output = "ReturnValue" and
+    preservesValue = false
+  }
+
+  override Type getReturnType() { result instanceof TypeString }
+}
+
+private class CollectToGroupingBy extends SyntheticCallable {
+  CollectToGroupingBy() {
+    this = "java.util.stream.collect()+Collectors.[groupingBy(Function),...]"
+  }
+
+  override Call getACall() {
+    exists(Method m |
+      m = result.(CollectCall).getArgument(0).(Collector).getMethod() and
+      m.hasName(["groupingBy", "groupingByConcurrent", "partitioningBy"]) and
+      m.getNumberOfParameters() = 1
+    )
+  }
+
+  override predicate propagatesFlow(string input, string output, boolean preservesValue) {
+    input = "Argument[this].Element" and
+    output = "ReturnValue.MapValue.Element" and
+    preservesValue = true
   }
 }

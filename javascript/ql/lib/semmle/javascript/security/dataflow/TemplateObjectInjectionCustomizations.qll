@@ -12,12 +12,17 @@ private import semmle.javascript.security.TaintedObjectCustomizations
  * template object injection vulnerabilities.
  */
 module TemplateObjectInjection {
+  import semmle.javascript.security.CommonFlowState
+
   /**
    * A data flow source for template object injection vulnerabilities.
    */
   abstract class Source extends DataFlow::Node {
-    /** Gets a flow label to associate with this source. */
-    abstract DataFlow::FlowLabel getAFlowLabel();
+    /** Gets a flow state for which this is a source. */
+    FlowState getAFlowState() { result.isTaint() }
+
+    /** DEPRECATED. Use `getAFlowState()` instead */
+    deprecated DataFlow::FlowLabel getAFlowLabel() { result = this.getAFlowState().toFlowLabel() }
   }
 
   /**
@@ -30,16 +35,13 @@ module TemplateObjectInjection {
    */
   abstract class Sanitizer extends DataFlow::Node { }
 
-  private class TaintedObjectSourceAsSource extends Source {
-    TaintedObjectSourceAsSource() { this instanceof TaintedObject::Source }
-
-    override DataFlow::FlowLabel getAFlowLabel() { result = TaintedObject::label() }
+  private class TaintedObjectSourceAsSource extends Source instanceof TaintedObject::Source {
+    override FlowState getAFlowState() { result.isTaintedObject() }
   }
 
-  private class RemoteFlowSourceAsSource extends Source {
-    RemoteFlowSourceAsSource() { this instanceof RemoteFlowSource }
-
-    override DataFlow::FlowLabel getAFlowLabel() { result.isTaint() }
+  /** An active threat-model source, considered as a flow source. */
+  private class ActiveThreatModelSourceAsSource extends Source, ActiveThreatModelSource {
+    override FlowState getAFlowState() { result.isTaint() }
   }
 
   /**
@@ -51,7 +53,7 @@ module TemplateObjectInjection {
       exists(
         Express::RouteSetup setup, Express::RouterDefinition router, Express::RouterDefinition top
       |
-        setup.getARouteHandler() = getRouteHandler() and
+        setup.getARouteHandler() = this.getRouteHandler() and
         setup.getRouter() = router and
         top.getASubRouter*() = router and
         usesVulnerableTemplateEngine(top)
@@ -76,8 +78,8 @@ module TemplateObjectInjection {
   predicate usesVulnerableTemplateEngine(Express::RouterDefinition router) {
     // option 1: `app.set("view engine", "theEngine")`.
     // Express will load the engine automatically.
-    exists(MethodCallExpr call |
-      router.flowsTo(call.getReceiver()) and
+    exists(DataFlow::MethodCallNode call |
+      router.ref().getAMethodCall() = call and
       call.getMethodName() = "set" and
       call.getArgument(0).getStringValue() = "view engine" and
       call.getArgument(1).getStringValue() = getAVulnerableTemplateEngine()
@@ -91,11 +93,11 @@ module TemplateObjectInjection {
       DataFlow::MethodCallNode viewEngineCall
     |
       // `app.engine("name", engine)
-      router.flowsTo(registerCall.getReceiver().asExpr()) and
+      router.ref().getAMethodCall() = registerCall and
       registerCall.getMethodName() = ["engine", "register"] and
       engine = registerCall.getArgument(1).getALocalSource() and
       // app.set("view engine", "name")
-      router.flowsTo(viewEngineCall.getReceiver().asExpr()) and
+      router.ref().getAMethodCall() = viewEngineCall and
       viewEngineCall.getMethodName() = "set" and
       viewEngineCall.getArgument(0).getStringValue() = "view engine" and
       // The name set by the `app.engine("name")` call matches `app.set("view engine", "name")`.

@@ -3,6 +3,7 @@ import semmle.code.java.deadcode.DeadEnumConstant
 import semmle.code.java.deadcode.DeadCodeCustomizations
 import semmle.code.java.deadcode.DeadField
 import semmle.code.java.deadcode.EntryPoints
+private import semmle.code.java.frameworks.kotlin.Serialization
 
 /**
  * Holds if the given callable has any liveness causes.
@@ -33,7 +34,7 @@ Callable possibleLivenessCause(Callable c, string reason) {
   or
   c.hasName("<clinit>") and
   reason = "class initialization" and
-  exists(RefType clintedType | c = clintedType.getASupertype*().getACallable() |
+  exists(RefType clintedType | c = clintedType.getAnAncestor().getACallable() |
     result.getDeclaringType() = clintedType or
     result.getAnAccessedField().getDeclaringType() = clintedType
   )
@@ -139,7 +140,7 @@ class NamespaceClass extends RefType {
  * This represents the set of classes and interfaces for which we will determine liveness. Each
  * `SourceClassOrInterfacce` will either be a `LiveClass` or `DeadClass`.
  */
-library class SourceClassOrInterface extends ClassOrInterface {
+class SourceClassOrInterface extends ClassOrInterface {
   SourceClassOrInterface() { this.fromSource() }
 }
 
@@ -155,14 +156,14 @@ library class SourceClassOrInterface extends ClassOrInterface {
  */
 class LiveClass extends SourceClassOrInterface {
   LiveClass() {
-    exists(Callable c | c.getDeclaringType().getASupertype*().getSourceDeclaration() = this |
+    exists(Callable c | c.getDeclaringType().getAnAncestor().getSourceDeclaration() = this |
       isLive(c)
     )
     or
     exists(LiveField f | f.getDeclaringType() = this |
       // A `serialVersionUID` field is considered to be a live field, but is
       // not be enough to be make this class live.
-      not f instanceof SerialVersionUIDField
+      not f instanceof SerialVersionUidField
     )
     or
     // If this is a namespace class, it is live if there is at least one live nested class.
@@ -172,9 +173,9 @@ class LiveClass extends SourceClassOrInterface {
     exists(NestedType r | r.getEnclosingType() = this | r instanceof LiveClass)
     or
     // An annotation on the class is reflectively accessed.
-    exists(ReflectiveAnnotationAccess reflectiveAnnotationAccess |
-      this = reflectiveAnnotationAccess.getInferredClassType() and
-      isLive(reflectiveAnnotationAccess.getEnclosingCallable())
+    exists(ReflectiveGetAnnotationCall reflectiveAnnotationCall |
+      this = reflectiveAnnotationCall.getInferredClassType() and
+      isLive(reflectiveAnnotationCall.getEnclosingCallable())
     )
     or
     this instanceof AnonymousClass
@@ -250,7 +251,7 @@ class DeadMethod extends Callable {
     // These getters and setters are often generated in an ad-hoc way by the developer, which leads to
     // methods that are theoretically dead, but uninteresting. We therefore ignore them, so long as
     // they are "simple".
-    not exists(JPAReadField readField | this.getDeclaringType() = readField.getDeclaringType() |
+    not exists(JpaReadField readField | this.getDeclaringType() = readField.getDeclaringType() |
       this.(GetterMethod).getField() = readField or
       this.(SetterMethod).getField() = readField
     )
@@ -273,14 +274,19 @@ class DeadMethod extends Callable {
 
 class RootdefCallable extends Callable {
   RootdefCallable() {
-    this.fromSource() and
+    this.getFile().isJavaSourceFile() and
     not this.(Method).overridesOrInstantiates(_)
   }
 
   Parameter unusedParameter() {
     exists(int i | result = this.getParameter(i) |
       not exists(result.getAnAccess()) and
-      not overrideAccess(this, i)
+      not overrideAccess(this, i) and
+      // Do not report unused parameters on extension parameters that are (companion) objects.
+      not (
+        result.isExtensionParameter() and
+        (result.getType() instanceof CompanionObject or result.getType() instanceof ClassObject)
+      )
     )
   }
 
@@ -302,6 +308,14 @@ class RootdefCallable extends Callable {
     exists(MemberRefExpr mre | mre.getReferencedCallable() = this)
     or
     this.getAnAnnotation() instanceof OverrideAnnotation
+    or
+    this.hasModifier("override")
+    or
+    // Exclude generated callables, such as `...$default` ones extracted from Kotlin code.
+    this.isCompilerGenerated()
+    or
+    // Exclude Kotlin serialization constructors.
+    this instanceof SerializationConstructor
   }
 }
 

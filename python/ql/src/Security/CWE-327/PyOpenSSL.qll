@@ -7,18 +7,19 @@ private import python
 private import semmle.python.ApiGraphs
 import TlsLibraryModel
 
-class PyOpenSSLContextCreation extends ContextCreation, DataFlow::CallCfgNode {
-  PyOpenSSLContextCreation() {
+class PyOpenSslContextCreation extends ContextCreation, DataFlow::CallCfgNode {
+  PyOpenSslContextCreation() {
     this = API::moduleImport("OpenSSL").getMember("SSL").getMember("Context").getACall()
   }
 
-  override string getProtocol() {
-    exists(DataFlow::Node protocolArg, PyOpenSSL pyo |
+  override ProtocolVersion getProtocol() {
+    exists(DataFlow::Node protocolArg, PyOpenSsl pyo |
       protocolArg in [this.getArg(0), this.getArgByName("method")]
     |
-      protocolArg in [
-          pyo.specific_version(result).getAUse(), pyo.unspecific_version(result).getAUse()
-        ]
+      protocolArg = pyo.specific_version(result).getAValueReachableFromSource()
+      or
+      protocolArg = pyo.unspecific_version().getAValueReachableFromSource() and
+      result = any(ProtocolVersion pv)
     )
   }
 }
@@ -43,24 +44,30 @@ class SetOptionsCall extends ProtocolRestriction, DataFlow::CallCfgNode {
   }
 
   override ProtocolVersion getRestriction() {
-    API::moduleImport("OpenSSL").getMember("SSL").getMember("OP_NO_" + result).getAUse() in [
-        this.getArg(0), this.getArgByName("options")
-      ]
+    API::moduleImport("OpenSSL")
+          .getMember("SSL")
+          .getMember("OP_NO_" + result)
+          .getAValueReachableFromSource() in [this.getArg(0), this.getArgByName("options")]
   }
 }
 
-class UnspecificPyOpenSSLContextCreation extends PyOpenSSLContextCreation, UnspecificContextCreation {
-  UnspecificPyOpenSSLContextCreation() { library instanceof PyOpenSSL }
-}
-
-class PyOpenSSL extends TlsLibrary {
-  PyOpenSSL() { this = "pyOpenSSL" }
+class PyOpenSsl extends TlsLibrary {
+  PyOpenSsl() { this = "pyOpenSSL" }
 
   override string specific_version_name(ProtocolVersion version) { result = version + "_METHOD" }
 
-  override string unspecific_version_name(ProtocolFamily family) {
-    // `"TLS_METHOD"` is not actually available in pyOpenSSL yet, but should be coming soon..
-    result = family + "_METHOD"
+  override string unspecific_version_name() {
+    // See
+    // - https://www.pyopenssl.org/en/23.0.0/api/ssl.html#module-OpenSSL.SSL
+    // - https://www.openssl.org/docs/manmaster/man3/DTLS_server_method.html#NOTES
+    //
+    // PyOpenSSL also allows DTLS
+    // see https://www.pyopenssl.org/en/stable/api/ssl.html#OpenSSL.SSL.Context
+    // although they are not mentioned here:
+    // https://www.pyopenssl.org/en/stable/api/ssl.html#OpenSSL.SSL.TLS_METHOD
+    result = ["TLS", "SSLv23"] + "_METHOD"
+    or
+    result = "TLS_" + ["CLIENT", "SERVER"] + "_METHOD"
   }
 
   override API::Node version_constants() { result = API::moduleImport("OpenSSL").getMember("SSL") }
@@ -68,7 +75,7 @@ class PyOpenSSL extends TlsLibrary {
   override ContextCreation default_context_creation() { none() }
 
   override ContextCreation specific_context_creation() {
-    result instanceof PyOpenSSLContextCreation
+    result instanceof PyOpenSslContextCreation
   }
 
   override DataFlow::Node insecure_connection_creation(ProtocolVersion version) { none() }
@@ -77,7 +84,5 @@ class PyOpenSSL extends TlsLibrary {
 
   override ProtocolRestriction protocol_restriction() { result instanceof SetOptionsCall }
 
-  override ProtocolUnrestriction protocol_unrestriction() {
-    result instanceof UnspecificPyOpenSSLContextCreation
-  }
+  override ProtocolUnrestriction protocol_unrestriction() { none() }
 }

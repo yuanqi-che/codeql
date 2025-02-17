@@ -34,7 +34,7 @@ class Stmt extends StmtParent, @stmt {
   }
 
   /** Gets a child of this statement. */
-  Element getAChild() { exists(int n | result = this.getChild(n)) }
+  Element getAChild() { result = this.getChild(_) }
 
   /** Gets the parent of this statement, if any. */
   StmtParent getParent() { stmtparents(underlyingElement(this), _, unresolveElement(result)) }
@@ -59,14 +59,29 @@ class Stmt extends StmtParent, @stmt {
     )
   }
 
-  override Location getLocation() { stmts(underlyingElement(this), _, result) }
+  /**
+   * Gets the `n`th compiler-generated destructor call that is performed after this statement, in
+   * order of destruction.
+   *
+   * For instance, in the following code, `getImplicitDestructorCall(0)` for the block will be the
+   * destructor call for `c2`:
+   * ```cpp
+   * {
+   *      MyClass c1;
+   *      MyClass c2;
+   * }
+   * ```
+   */
+  DestructorCall getImplicitDestructorCall(int n) {
+    synthetic_destructor_call(this, max(int i | synthetic_destructor_call(this, i, _)) - n, result)
+  }
 
   /**
-   * Gets an int indicating the type of statement that this represents.
-   *
-   * DEPRECATED: use the subclasses of `Stmt` rather than relying on this predicate.
+   * Gets a compiler-generated destructor call that is performed after this statement.
    */
-  deprecated int getKind() { stmts(underlyingElement(this), result, _) }
+  DestructorCall getAnImplicitDestructorCall() { synthetic_destructor_call(this, _, result) }
+
+  override Location getLocation() { stmts(underlyingElement(this), _, result) }
 
   override string toString() { none() }
 
@@ -221,6 +236,26 @@ class IfStmt extends ConditionalStmt, @stmt_if {
   override string getAPrimaryQlClass() { result = "IfStmt" }
 
   /**
+   * Gets the initialization statement of this 'if' statement, if any.
+   *
+   * For example, for
+   * ```
+   * if (int x = y; b) { f(); }
+   * ```
+   * the result is `int x = y;`.
+   *
+   * Does not hold if the initialization statement is missing or an empty statement, as in
+   * ```
+   * if (b) { f(); }
+   * ```
+   * or
+   * ```
+   * if (; b) { f(); }
+   * ```
+   */
+  Stmt getInitialization() { if_initialization(underlyingElement(this), unresolveElement(result)) }
+
+  /**
    * Gets the condition expression of this 'if' statement.
    *
    * For example, for
@@ -229,7 +264,7 @@ class IfStmt extends ConditionalStmt, @stmt_if {
    * ```
    * the result is `b`.
    */
-  Expr getCondition() { result = this.getChild(0) }
+  Expr getCondition() { result = this.getChild(1) }
 
   override Expr getControllingExpr() { result = this.getCondition() }
 
@@ -271,7 +306,7 @@ class IfStmt extends ConditionalStmt, @stmt_if {
    * if (b) { x = 1; }
    * ```
    */
-  predicate hasElse() { exists(Stmt s | this.getElse() = s) }
+  predicate hasElse() { exists(this.getElse()) }
 
   override string toString() { result = "if (...) ... " }
 
@@ -307,6 +342,28 @@ class ConstexprIfStmt extends ConditionalStmt, @stmt_constexpr_if {
   override string getAPrimaryQlClass() { result = "ConstexprIfStmt" }
 
   /**
+   * Gets the initialization statement of this 'constexpr if' statement, if any.
+   *
+   * For example, for
+   * ```
+   * if constexpr (int x = y; b) { f(); }
+   * ```
+   * the result is `int x = y;`.
+   *
+   * Does not hold if the initialization statement is missing or an empty statement, as in
+   * ```
+   * if constexpr (b) { f(); }
+   * ```
+   * or
+   * ```
+   * if constexpr (; b) { f(); }
+   * ```
+   */
+  Stmt getInitialization() {
+    constexpr_if_initialization(underlyingElement(this), unresolveElement(result))
+  }
+
+  /**
    * Gets the condition expression of this 'constexpr if' statement.
    *
    * For example, for
@@ -315,7 +372,7 @@ class ConstexprIfStmt extends ConditionalStmt, @stmt_constexpr_if {
    * ```
    * the result is `b`.
    */
-  Expr getCondition() { result = this.getChild(0) }
+  Expr getCondition() { result = this.getChild(1) }
 
   override Expr getControllingExpr() { result = this.getCondition() }
 
@@ -357,7 +414,7 @@ class ConstexprIfStmt extends ConditionalStmt, @stmt_constexpr_if {
    * if constexpr (b) { x = 1; }
    * ```
    */
-  predicate hasElse() { exists(Stmt s | this.getElse() = s) }
+  predicate hasElse() { exists(this.getElse()) }
 
   override string toString() { result = "if constexpr (...) ... " }
 
@@ -378,6 +435,154 @@ class ConstexprIfStmt extends ConditionalStmt, @stmt_constexpr_if {
     this.getThen().getGeneratingMacro() = result and
     (this.hasElse() implies this.getElse().getGeneratingMacro() = result)
   }
+}
+
+/**
+ * A C/C++ '(not) consteval if'. For example, the `if consteval` statement
+ * in the following code:
+ * ```cpp
+ * if consteval {
+ *   ...
+ * }
+ * ```
+ */
+class ConstevalIfStmt extends Stmt, @stmt_consteval_or_not_consteval_if {
+  override string getAPrimaryQlClass() { result = "ConstevalIfStmt" }
+
+  override string toString() {
+    if this.isNot() then result = "if ! consteval ..." else result = "if consteval ..."
+  }
+
+  /**
+   * Holds if this is a 'not consteval if' statement.
+   *
+   * For example, this holds for
+   * ```cpp
+   * if ! consteval { return true; }
+   * ```
+   * but not for
+   * ```cpp
+   * if consteval { return true; }
+   * ```
+   */
+  predicate isNot() { this instanceof @stmt_not_consteval_if }
+
+  /**
+   * Gets the 'then' statement of this '(not) consteval if' statement.
+   *
+   * For example, for
+   * ```cpp
+   * if consteval { return true; }
+   * ```
+   * the result is the `BlockStmt` `{ return true; }`.
+   */
+  Stmt getThen() { consteval_if_then(underlyingElement(this), unresolveElement(result)) }
+
+  /**
+   * Gets the 'else' statement of this '(not) constexpr if' statement, if any.
+   *
+   * For example, for
+   * ```cpp
+   * if consteval { return true; } else { return false; }
+   * ```
+   * the result is the `BlockStmt` `{ return false; }`, and for
+   * ```cpp
+   * if consteval { return true; }
+   * ```
+   * there is no result.
+   */
+  Stmt getElse() { consteval_if_else(underlyingElement(this), unresolveElement(result)) }
+
+  /**
+   * Holds if this '(not) constexpr if' statement has an 'else' statement.
+   *
+   * For example, this holds for
+   * ```cpp
+   * if consteval { return true; } else { return false; }
+   * ```
+   * but not for
+   * ```cpp
+   * if consteval { return true; }
+   * ```
+   */
+  predicate hasElse() { exists(this.getElse()) }
+
+  override predicate mayBeImpure() {
+    this.getThen().mayBeImpure() or
+    this.getElse().mayBeImpure()
+  }
+
+  override predicate mayBeGloballyImpure() {
+    this.getThen().mayBeGloballyImpure() or
+    this.getElse().mayBeGloballyImpure()
+  }
+
+  override MacroInvocation getGeneratingMacro() {
+    this.getThen().getGeneratingMacro() = result and
+    (this.hasElse() implies this.getElse().getGeneratingMacro() = result)
+  }
+
+  /**
+   * Gets the statement of this '(not) consteval if' statement evaluated during compile time, if any.
+   *
+   * For example, for
+   * ```cpp
+   * if ! consteval { return true; } else { return false; }
+   * ```
+   * the result is the `BlockStmt` `{ return false; }`, and for
+   * ```cpp
+   * if ! consteval { return true; }
+   * ```
+   * there is no result.
+   */
+  Stmt getCompileTimeEvaluatedBranch() {
+    if this.isNot() then result = this.getElse() else result = this.getThen()
+  }
+
+  /**
+   * Holds if this '(not) constexpr if' statement has a compile time evaluated statement.
+   *
+   * For example, this holds for
+   * ```cpp
+   * if ! consteval { return true; } else { return false; }
+   * ```
+   * but not for
+   * ```cpp
+   * if ! consteval { return true; }
+   * ```
+   */
+  predicate hasCompileTimeEvaluatedBranch() { exists(this.getCompileTimeEvaluatedBranch()) }
+
+  /**
+   * Gets the statement of this '(not) consteval if' statement evaluated during runtime, if any.
+   *
+   * For example, for
+   * ```cpp
+   * if consteval { return true; } else { return false; }
+   * ```
+   * the result is the `BlockStmt` `{ return false; }`, and for
+   * ```cpp
+   * if consteval { return true; }
+   * ```
+   * there is no result.
+   */
+  Stmt getRuntimeEvaluatedBranch() {
+    if this.isNot() then result = this.getThen() else result = this.getElse()
+  }
+
+  /**
+   * Holds if this '(not) constexpr if' statement has a runtime evaluated statement.
+   *
+   * For example, this holds for
+   * ```cpp
+   * if consteval { return true; } else { return false; }
+   * ```
+   * but not for
+   * ```cpp
+   * if consteval { return true; }
+   * ```
+   */
+  predicate hasRuntimeEvaluatedBranch() { exists(this.getRuntimeEvaluatedBranch()) }
 }
 
 private class TLoop = @stmt_while or @stmt_end_test_while or @stmt_range_based_for or @stmt_for;
@@ -836,6 +1041,26 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
   override string getAPrimaryQlClass() { result = "RangeBasedForStmt" }
 
   /**
+   * Gets the initialization statement of this 'for' statement, if any.
+   *
+   * For example, for
+   * ```
+   * for (int x = y; auto z : ... ) { }
+   * ```
+   * the result is `int x = y;`.
+   *
+   * Does not hold if the initialization statement is missing or an empty statement, as in
+   * ```
+   * for (auto z : ...) { }
+   * ```
+   * or
+   * ```
+   * for (; auto z : ) { }
+   * ```
+   */
+  Stmt getInitialization() { for_initialization(underlyingElement(this), unresolveElement(result)) }
+
+  /**
    * Gets the 'body' statement of this range-based 'for' statement.
    *
    * For example, for
@@ -844,7 +1069,7 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
    * ```
    * the result is the `BlockStmt` `{ y += x; }`.
    */
-  override Stmt getStmt() { result = this.getChild(5) }
+  override Stmt getStmt() { result = this.getChild(6) }
 
   override string toString() { result = "for(...:...) ..." }
 
@@ -857,7 +1082,7 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
    * ```
    * the result is `int x`.
    */
-  LocalVariable getVariable() { result = this.getChild(4).(DeclStmt).getADeclaration() }
+  LocalVariable getVariable() { result = this.getChild(5).(DeclStmt).getADeclaration() }
 
   /**
    * Gets the expression giving the range to iterate over.
@@ -871,7 +1096,7 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
   Expr getRange() { result = this.getRangeVariable().getInitializer().getExpr() }
 
   /** Gets the compiler-generated `__range` variable after desugaring. */
-  LocalVariable getRangeVariable() { result = this.getChild(0).(DeclStmt).getADeclaration() }
+  LocalVariable getRangeVariable() { result = this.getChild(1).(DeclStmt).getADeclaration() }
 
   /**
    * Gets the compiler-generated `__begin != __end` which is the
@@ -879,7 +1104,7 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
    * It will be either an `NEExpr` or a call to a user-defined
    * `operator!=`.
    */
-  override Expr getCondition() { result = this.getChild(2) }
+  override Expr getCondition() { result = this.getChild(3) }
 
   override Expr getControllingExpr() { result = this.getCondition() }
 
@@ -888,7 +1113,7 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
    * `__end`, initializing them to the values they have before entering the
    * desugared loop.
    */
-  DeclStmt getBeginEndDeclaration() { result = this.getChild(1) }
+  DeclStmt getBeginEndDeclaration() { result = this.getChild(2) }
 
   /** Gets the compiler-generated `__begin` variable after desugaring. */
   LocalVariable getBeginVariable() { result = this.getBeginEndDeclaration().getDeclaration(0) }
@@ -902,7 +1127,7 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
    * be either a `PrefixIncrExpr` or a call to a user-defined
    * `operator++`.
    */
-  Expr getUpdate() { result = this.getChild(3) }
+  Expr getUpdate() { result = this.getChild(4) }
 
   /** Gets the compiler-generated `__begin` variable after desugaring. */
   LocalVariable getAnIterationVariable() { result = this.getBeginVariable() }
@@ -933,7 +1158,7 @@ class ForStmt extends Loop, @stmt_for {
    *
    * Does not hold if the initialization statement is an empty statement, as in
    * ```
-   * for (; i < 10; i++) { j++ }
+   * for (; i < 10; i++) { j++; }
    * ```
    */
   Stmt getInitialization() { for_initialization(underlyingElement(this), unresolveElement(result)) }
@@ -1231,38 +1456,6 @@ class SwitchCase extends Stmt, @stmt_switch_case {
   int getChildNum() { switch_case(_, result, underlyingElement(this)) }
 
   /**
-   * DEPRECATED: use `SwitchCase.getAStmt` or `ControlFlowNode.getASuccessor`
-   * rather than this predicate.
-   *
-   * Gets the `BlockStmt` statement immediately following this 'switch case'
-   * statement, if any.
-   *
-   * For example, for
-   * ```
-   * switch (i) {
-   * case 5:
-   *     x = 1;
-   *     break;
-   * case 6:
-   * case 7:
-   *     { x = 2; break; }
-   * default:
-   *     { x = 3; }
-   *     x = 4;
-   *     break;
-   * }
-   * ```
-   * the `case 7:` has result `{ x = 2; break; }`, `default:` has result
-   * `{ x = 3; }`, and the others have no result.
-   */
-  deprecated BlockStmt getLabelledStmt() {
-    exists(int i, Stmt parent |
-      this = parent.getChild(i) and
-      result = parent.getChild(i + 1)
-    )
-  }
-
-  /**
    * Gets the next `SwitchCase` belonging to the same 'switch'
    * statement, if any.
    *
@@ -1510,6 +1703,28 @@ class SwitchStmt extends ConditionalStmt, @stmt_switch {
   override string getAPrimaryQlClass() { result = "SwitchStmt" }
 
   /**
+   * Gets the initialization statement of this 'switch' statement, if any.
+   *
+   * For example, for
+   * ```
+   * switch (int x = y; b) { }
+   * ```
+   * the result is `int x = y;`.
+   *
+   * Does not hold if the initialization statement is missing or an empty statement, as in
+   * ```
+   * switch (b) { }
+   * ```
+   * or
+   * ```
+   * switch (; b) { }
+   * ```
+   */
+  Stmt getInitialization() {
+    switch_initialization(underlyingElement(this), unresolveElement(result))
+  }
+
+  /**
    * Gets the expression that this 'switch' statement switches on.
    *
    * For example, for
@@ -1524,7 +1739,7 @@ class SwitchStmt extends ConditionalStmt, @stmt_switch {
    * ```
    * the result is `i`.
    */
-  Expr getExpr() { result = this.getChild(0) }
+  Expr getExpr() { result = this.getChild(1) }
 
   override Expr getControllingExpr() { result = this.getExpr() }
 
@@ -1735,23 +1950,6 @@ class Handler extends Stmt, @stmt_handler {
    * parameter `e`, whereas `catch(...)` does not introduce a parameter.
    */
   Parameter getParameter() { result = this.getBlock().getParameter() }
-
-  override predicate mayBeImpure() { none() }
-
-  override predicate mayBeGloballyImpure() { none() }
-}
-
-/**
- * DEPRECATED: Objective-C is no longer supported.
- * The end of a 'finally' clause.
- *
- * This has no concrete representation in the source, but makes the
- * control flow graph easier to use.
- */
-deprecated class FinallyEnd extends Stmt {
-  FinallyEnd() { none() }
-
-  override string toString() { result = "<finally end>" }
 
   override predicate mayBeImpure() { none() }
 

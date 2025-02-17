@@ -19,29 +19,29 @@ class EnterpriseBean extends RefType {
 }
 
 /** A local EJB home interface. */
-class LocalEJBHomeInterface extends Interface {
-  LocalEJBHomeInterface() {
+class LocalEjbHomeInterface extends Interface {
+  LocalEjbHomeInterface() {
     exists(Interface i | i.hasQualifiedName("javax.ejb", "EJBLocalHome") | this.hasSupertype+(i))
   }
 }
 
 /** A remote EJB home interface. */
-class RemoteEJBHomeInterface extends Interface {
-  RemoteEJBHomeInterface() {
+class RemoteEjbHomeInterface extends Interface {
+  RemoteEjbHomeInterface() {
     exists(Interface i | i.hasQualifiedName("javax.ejb", "EJBHome") | this.hasSupertype+(i))
   }
 }
 
 /** A local EJB interface. */
-class LocalEJBInterface extends Interface {
-  LocalEJBInterface() {
+class LocalEjbInterface extends Interface {
+  LocalEjbInterface() {
     exists(Interface i | i.hasQualifiedName("javax.ejb", "EJBLocalObject") | this.hasSupertype+(i))
   }
 }
 
 /** A remote EJB interface. */
-class RemoteEJBInterface extends Interface {
-  RemoteEJBInterface() {
+class RemoteEjbInterface extends Interface {
+  RemoteEjbInterface() {
     exists(Interface i | i.hasQualifiedName("javax.ejb", "EJBObject") | this.hasSupertype+(i))
   }
 }

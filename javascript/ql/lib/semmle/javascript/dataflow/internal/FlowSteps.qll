@@ -5,7 +5,7 @@
  */
 
 import javascript
-import semmle.javascript.dataflow.Configuration
+deprecated import semmle.javascript.dataflow.Configuration
 import semmle.javascript.dataflow.internal.CallGraphs
 private import semmle.javascript.internal.CachedStages
 
@@ -31,19 +31,35 @@ predicate returnExpr(Function f, DataFlow::Node source, DataFlow::Node sink) {
 }
 
 /**
+ * A step from a post-update node to the local sources of the corresponding pre-update node.
+ *
+ * This ensures that `getPostUpdateNode()` can be used in place of `getALocalSource()` when generating
+ * store steps, and the resulting step will work in both data flow analyses.
+ */
+pragma[nomagic]
+private predicate legacyPostUpdateStep(DataFlow::Node pred, DataFlow::Node succ) {
+  exists(DataFlow::Node node |
+    pred = node.getPostUpdateNode() and
+    succ = node.getALocalSource()
+  )
+}
+
+/**
  * Holds if data can flow in one step from `pred` to `succ`,  taking
  * additional steps from the configuration into account.
  */
 pragma[inline]
-predicate localFlowStep(
+deprecated predicate localFlowStep(
   DataFlow::Node pred, DataFlow::Node succ, DataFlow::Configuration configuration,
   FlowLabel predlbl, FlowLabel succlbl
 ) {
   pred = succ.getAPredecessor() and predlbl = succlbl
   or
-  DataFlow::SharedFlowStep::step(pred, succ) and predlbl = succlbl
+  legacyPostUpdateStep(pred, succ) and predlbl = succlbl
   or
-  DataFlow::SharedFlowStep::step(pred, succ, predlbl, succlbl)
+  DataFlow::LegacyFlowStep::step(pred, succ) and predlbl = succlbl
+  or
+  DataFlow::LegacyFlowStep::step(pred, succ, predlbl, succlbl)
   or
   exists(boolean vp | configuration.isAdditionalFlowStep(pred, succ, vp) |
     vp = true and
@@ -139,7 +155,7 @@ private module CachedSteps {
    * Holds if `invk` may invoke `f`.
    */
   cached
-  predicate calls(DataFlow::SourceNode invk, Function f) {
+  predicate calls(DataFlow::Node invk, Function f) {
     f = invk.(DataFlow::InvokeNode).getACallee(0)
     or
     f = invk.(DataFlow::PropRef).getAnAccessorCallee().getFunction()
@@ -212,6 +228,8 @@ private module CachedSteps {
         )
         or
         parm = reflectiveParameterAccess(f, i)
+        or
+        parm = restParameterAccess(f, i)
       )
       or
       arg = invk.(DataFlow::CallNode).getReceiver() and
@@ -222,6 +240,14 @@ private module CachedSteps {
       or
       arg = invk.(DataFlow::PropWrite).getRhs() and
       parm = DataFlow::parameterNode(f.getParameter(0))
+      or
+      calls(invk, f) and
+      exists(MethodCallExpr apply |
+        invk = DataFlow::reflectiveCallNode(apply) and
+        apply.getMethodName() = "apply" and
+        arg = apply.getArgument(1).flow()
+      ) and
+      parm.(DataFlow::ReflectiveParametersNode).getFunction() = f
     )
     or
     exists(DataFlow::Node callback, int i, Parameter p, Function target |
@@ -262,6 +288,21 @@ private module CachedSteps {
    */
   private DataFlow::SourceNode reflectiveParameterAccess(Function f, int i) {
     result.(DataFlow::PropRead).accesses(argumentsAccess(f), any(string p | i = p.toInt()))
+  }
+
+  /**
+   * Gets a data-flow node that refers to the `i`th parameter of `f` through its `...rest` argument.
+   *
+   * If there is normal arguments before `...rest`, we have to account for them.
+   * For example, a function `function f(a, ...rest) { console.log(rest[1]); }`:
+   * Here, `restParameterAccess(_, 2)` will return `rest[1]`, because there is the leading
+   * `a` parameter.
+   */
+  private DataFlow::SourceNode restParameterAccess(Function f, int i) {
+    result
+        .(DataFlow::PropRead)
+        .accesses(f.getRestParameter().flow().(DataFlow::ParameterNode).getALocalUse(),
+          any(string idx | i = idx.toInt() + f.getNumParameter() - 1))
   }
 
   /**
@@ -480,7 +521,7 @@ private module CachedSteps {
   }
 
   /**
-   * A step from `pred` to `succ` through a call to an identity function.
+   * Holds if there is a step from `pred` to `succ` through a call to an identity function.
    */
   cached
   predicate identityFunctionStep(DataFlow::Node pred, DataFlow::CallNode succ) {
@@ -504,9 +545,9 @@ class Boolean extends boolean {
 /**
  * A summary of an inter-procedural data flow path.
  */
-newtype TPathSummary =
+deprecated newtype TPathSummary =
   /** A summary of an inter-procedural data flow path. */
-  MkPathSummary(Boolean hasReturn, Boolean hasCall, FlowLabel start, FlowLabel end)
+  deprecated MkPathSummary(Boolean hasReturn, Boolean hasCall, FlowLabel start, FlowLabel end)
 
 /**
  * A summary of an inter-procedural data flow path.
@@ -519,7 +560,7 @@ newtype TPathSummary =
  * We only want to build properly matched call/return sequences, so if a path has both
  * call steps and return steps, all return steps must precede all call steps.
  */
-class PathSummary extends TPathSummary {
+deprecated class PathSummary extends TPathSummary {
   Boolean hasReturn;
   Boolean hasCall;
   FlowLabel start;
@@ -593,7 +634,7 @@ class PathSummary extends TPathSummary {
   }
 }
 
-module PathSummary {
+deprecated module PathSummary {
   /**
    * Gets a summary describing a path without any calls or returns.
    */

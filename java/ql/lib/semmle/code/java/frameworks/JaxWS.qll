@@ -4,7 +4,8 @@
  */
 
 import java
-private import semmle.code.java.dataflow.ExternalFlow
+private import semmle.code.java.frameworks.Networking
+private import semmle.code.java.frameworks.Rmi
 private import semmle.code.java.security.XSS
 
 /**
@@ -24,16 +25,112 @@ string getAJaxRsPackage(string subpackage) { result = getAJaxRsPackage() + "." +
  */
 class JaxWsEndpoint extends Class {
   JaxWsEndpoint() {
-    exists(AnnotationType a | a = this.getAnAnnotation().getType() |
+    exists(AnnotationType a | a = this.getAnAncestor().getAnAnnotation().getType() |
       a.hasName(["WebService", "WebServiceProvider", "WebServiceClient"])
     )
   }
 
-  /** Gets a method annotated with `@WebMethod` or `@WebEndpoint`. */
-  Callable getARemoteMethod() {
+  /**
+   * Gets a method of this class that is not an excluded `@WebMethod`,
+   * and the parameters and return value of which are either of an acceptable type,
+   * or are annotated with `@XmlJavaTypeAdapter`.
+   */
+  Method getARemoteMethod() {
     result = this.getACallable() and
-    exists(AnnotationType a | a = result.getAnAnnotation().getType() |
-      a.hasName(["WebMethod", "WebEndpoint"])
+    result.isPublic() and
+    not result instanceof InitializerMethod and
+    not exists(Annotation a | a = result.getAnAnnotation() |
+      a.getType().hasQualifiedName(["javax", "jakarta"] + ".jws", "WebMethod") and
+      a.getValue("exclude").(BooleanLiteral).getBooleanValue() = true
+    ) and
+    forex(ParamOrReturn paramOrRet | paramOrRet = result.getAParameter() or paramOrRet = result |
+      exists(Type t | t = paramOrRet.getType() |
+        t instanceof JaxAcceptableType
+        or
+        t.(Annotatable).getAnAnnotation().getType() instanceof XmlJavaTypeAdapter
+        or
+        t instanceof VoidType
+      )
+      or
+      paramOrRet.getInheritedAnnotation().getType() instanceof XmlJavaTypeAdapter
+    )
+  }
+}
+
+/** The annotation type `@XmlJavaTypeAdapter`. */
+class XmlJavaTypeAdapter extends AnnotationType {
+  XmlJavaTypeAdapter() {
+    this.hasQualifiedName(["javax", "jakarta"] + ".xml.bind.annotation.adapters",
+      "XmlJavaTypeAdapter")
+  }
+}
+
+private class ParamOrReturn extends Annotatable {
+  ParamOrReturn() { this instanceof Parameter or this instanceof Method }
+
+  Type getType() {
+    result = this.(Parameter).getType()
+    or
+    result = this.(Method).getReturnType()
+  }
+
+  Annotation getInheritedAnnotation() {
+    result = this.getAnAnnotation()
+    or
+    result = this.(Method).getAnOverride*().getAnAnnotation()
+    or
+    result =
+      this.(Parameter)
+          .getCallable()
+          .(Method)
+          .getAnOverride*()
+          .getParameter(this.(Parameter).getPosition())
+          .getAnAnnotation()
+  }
+}
+
+// JAX-RPC 1.1, section 5
+private class JaxAcceptableType extends Type {
+  JaxAcceptableType() {
+    // JAX-RPC 1.1, section 5.1.1
+    this instanceof PrimitiveType
+    or
+    // JAX-RPC 1.1, section 5.1.2
+    this.(Array).getElementType() instanceof JaxAcceptableType
+    or
+    // JAX-RPC 1.1, section 5.1.3
+    this instanceof JaxAcceptableStandardClass
+    or
+    // JAX-RPC 1.1, section 5.1.4
+    this instanceof JaxValueType
+  }
+}
+
+private class JaxAcceptableStandardClass extends RefType {
+  JaxAcceptableStandardClass() {
+    this instanceof TypeString or
+    this.hasQualifiedName("java.util", "Date") or
+    this.hasQualifiedName("java.util", "Calendar") or
+    this.hasQualifiedName("java.math", "BigInteger") or
+    this.hasQualifiedName("java.math", "BigDecimal") or
+    this.hasQualifiedName("javax.xml.namespace", "QName") or
+    this instanceof TypeUri
+  }
+}
+
+// JAX-RPC 1.1, section 5.4
+private class JaxValueType extends RefType {
+  JaxValueType() {
+    not this instanceof Wildcard and
+    // Mutually exclusive with other `JaxAcceptableType`s
+    not this instanceof Array and
+    not this instanceof JaxAcceptableStandardClass and
+    not this.getPackage().getName().matches("java.%") and
+    // Must not implement (directly or indirectly) the java.rmi.Remote interface.
+    not this.getAnAncestor() instanceof TypeRemote and
+    // The Java type of a public field must be a supported JAX-RPC type as specified in the section 5.1.
+    forall(Field f | this.getAMember() = f and f.isPublic() |
+      f.getType() instanceof JaxAcceptableType
     )
   }
 }
@@ -48,6 +145,21 @@ private predicate hasPathAnnotation(Annotatable annotatable) {
   |
     a.hasName("Path")
   )
+}
+
+/**
+ * Holds if the class has or inherits the JaxRs `@Path` annotation.
+ */
+private predicate hasOrInheritsPathAnnotation(Class c) {
+  hasPathAnnotation(c)
+  or
+  // Note that by the JAX-RS spec, JAX-RS annotations on classes and interfaces
+  // are not inherited, but some implementations, like Apache CXF, do inherit
+  // them. I think this only applies if there are no JaxRS annotations on the
+  // class itself, as that is the rule in the JAX-RS spec for method
+  // annotations.
+  hasPathAnnotation(c.getAnAncestor()) and
+  not exists(c.getAnAnnotation().(JaxRSAnnotation))
 }
 
 /**
@@ -94,7 +206,7 @@ class JaxRsResourceMethod extends Method {
 class JaxRsResourceClass extends Class {
   JaxRsResourceClass() {
     // A root resource class has a @Path annotation on the class.
-    hasPathAnnotation(this)
+    hasOrInheritsPathAnnotation(this)
     or
     // A sub-resource
     exists(JaxRsResourceClass resourceClass, Method method |
@@ -130,7 +242,7 @@ class JaxRsResourceClass extends Class {
   /**
    * Holds if this class is a "root resource" class
    */
-  predicate isRootResource() { hasPathAnnotation(this) }
+  predicate isRootResource() { hasOrInheritsPathAnnotation(this) }
 
   /**
    * Gets a `Constructor` that may be called by a JaxRS container to construct this class reflectively.
@@ -296,11 +408,7 @@ class JaxRSProducesAnnotation extends JaxRSAnnotation {
   /**
    * Gets a declared content type that can be produced by this resource.
    */
-  Expr getADeclaredContentTypeExpr() {
-    result = this.getAValue() and not result instanceof ArrayInit
-    or
-    result = this.getAValue().(ArrayInit).getAnInit()
-  }
+  Expr getADeclaredContentTypeExpr() { result = this.getAnArrayValue("value") }
 }
 
 /** An `@Consumes` annotation that describes content types can be consumed by this resource. */
@@ -318,331 +426,33 @@ private class JaxRSXssSink extends XssSink {
     |
       not exists(resourceMethod.getProducesAnnotation())
       or
-      isXssVulnerableContentType(getContentTypeString(resourceMethod
-              .getProducesAnnotation()
-              .getADeclaredContentTypeExpr()))
+      isXssVulnerableContentTypeExpr(resourceMethod
+            .getProducesAnnotation()
+            .getADeclaredContentTypeExpr())
     )
   }
 }
 
-/** A URL redirection sink from JAX-RS */
-private class JaxRsUrlRedirectSink extends SinkModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;Response;true;" + ["seeOther", "temporaryRedirect"] +
-        ";;;Argument[0];url-redirect"
-  }
+pragma[nomagic]
+private predicate contentTypeString(string s) { s = getContentTypeString(_) }
+
+pragma[nomagic]
+private predicate isXssVulnerableContentTypeString(string s) {
+  contentTypeString(s) and isXssVulnerableContentType(s)
 }
 
-/**
- * Model Response:
- *
- * - the returned ResponseBuilder gains taint from a tainted entity or existing Response
- */
-private class ResponseModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;Response;false;" + ["accepted", "fromResponse", "ok"] +
-        ";;;Argument[0];ReturnValue;taint"
-  }
-}
-
-/**
- * Model ResponseBuilder:
- *
- * - becomes tainted by a tainted entity, but not by metadata, headers etc
- * - build() method returns taint
- * - almost all methods are fluent, and so preserve value
- */
-private class ResponseBuilderModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;Response$ResponseBuilder;true;" +
-        [
-          "allow", "cacheControl", "contentLocation", "cookie", "encoding", "entity", "expires",
-          "header", "language", "lastModified", "link", "links", "location", "replaceAll", "status",
-          "tag", "type", "variant", "variants"
-        ] + ";;;Argument[-1];ReturnValue;value"
-    or
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;Response$ResponseBuilder;true;" +
-        [
-          "build;;;Argument[-1];ReturnValue;taint", "entity;;;Argument[0];Argument[-1];taint",
-          "clone;;;Argument[-1];ReturnValue;taint"
-        ]
-  }
-}
-
-/**
- * Model HttpHeaders: methods that Date have to be syntax-checked, but those returning MediaType
- * or Locale are assumed potentially dangerous, as these types do not generally check that the
- * input data is recognised, only that it conforms to the expected syntax.
- */
-private class HttpHeadersModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;HttpHeaders;true;" +
-        [
-          "getAcceptableLanguages", "getAcceptableMediaTypes", "getCookies", "getHeaderString",
-          "getLanguage", "getMediaType", "getRequestHeader", "getRequestHeaders"
-        ] + ";;;Argument[-1];ReturnValue;taint"
-  }
-}
-
-/**
- * Model MultivaluedMap, which extends Map<K, List<V>> and provides a few extra helper methods.
- */
-private class MultivaluedMapModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;MultivaluedMap;true;" +
-        [
-          "add;;;Argument[0];MapKey of Argument[-1];value",
-          "add;;;Argument[1];Element of MapValue of Argument[-1];value",
-          "addAll;;;Argument[0];MapKey of Argument[-1];value",
-          "addAll;(Object,List);;Element of Argument[1];Element of MapValue of Argument[-1];value",
-          "addAll;(Object,Object[]);;ArrayElement of Argument[1];Element of MapValue of Argument[-1];value",
-          "addFirst;;;Argument[0];MapKey of Argument[-1];value",
-          "addFirst;;;Argument[1];Element of MapValue of Argument[-1];value",
-          "getFirst;;;Element of MapValue of Argument[-1];ReturnValue;value",
-          "putSingle;;;Argument[0];MapKey of Argument[-1];value",
-          "putSingle;;;Argument[1];Element of MapValue of Argument[-1];value"
-        ]
-  }
-}
-
-/**
- * Model AbstractMultivaluedMap, which implements MultivaluedMap.
- */
-private class AbstractMultivaluedMapModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;AbstractMultivaluedMap;false;AbstractMultivaluedMap;;;" +
-        [
-          "MapKey of Argument[0];MapKey of Argument[-1];value",
-          "MapValue of Argument[0];MapValue of Argument[-1];value"
-        ]
-  }
-}
-
-/**
- * Model MultivaluedHashMap, which extends AbstractMultivaluedMap.
- */
-private class MultivaluedHashMapModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;MultivaluedHashMap;false;MultivaluedHashMap;" +
-        [
-          "(Map);;MapKey of Argument[0];MapKey of Argument[-1];value",
-          "(Map);;MapValue of Argument[0];Element of MapValue of Argument[-1];value",
-          "(MultivaluedMap);;MapKey of Argument[0];MapKey of Argument[-1];value",
-          "(MultivaluedMap);;MapValue of Argument[0];MapValue of Argument[-1];value"
-        ]
-  }
-}
-
-/**
- * Model PathSegment, which wraps a path and its associated matrix parameters.
- */
-private class PathSegmentModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;PathSegment;true;" + ["getMatrixParameters", "getPath"] +
-        ";;;Argument[-1];ReturnValue;taint"
-  }
-}
-
-/**
- * Model UriInfo, which provides URI element accessors.
- */
-private class UriInfoModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;UriInfo;true;" +
-        [
-          "getAbsolutePath;;;Argument[-1];ReturnValue;taint",
-          "getAbsolutePathBuilder;;;Argument[-1];ReturnValue;taint",
-          "getPath;;;Argument[-1];ReturnValue;taint",
-          "getPathParameters;;;Argument[-1];ReturnValue;taint",
-          "getPathSegments;;;Argument[-1];ReturnValue;taint",
-          "getQueryParameters;;;Argument[-1];ReturnValue;taint",
-          "getRequestUri;;;Argument[-1];ReturnValue;taint",
-          "getRequestUriBuilder;;;Argument[-1];ReturnValue;taint",
-          "relativize;;;Argument[0];ReturnValue;taint", "resolve;;;Argument[-1];ReturnValue;taint",
-          "resolve;;;Argument[0];ReturnValue;taint"
-        ]
-  }
-}
-
-/**
- * Model Cookie, a simple tuple type.
- */
-private class CookieModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;Cookie;" +
-        [
-          "true;getDomain;;;Argument[-1];ReturnValue;taint",
-          "true;getName;;;Argument[-1];ReturnValue;taint",
-          "true;getPath;;;Argument[-1];ReturnValue;taint",
-          "true;getValue;;;Argument[-1];ReturnValue;taint",
-          "true;getVersion;;;Argument[-1];ReturnValue;taint",
-          "true;toString;;;Argument[-1];ReturnValue;taint",
-          "false;Cookie;;;Argument[0..4];Argument[-1];taint",
-          "false;valueOf;;;Argument[0];ReturnValue;taint"
-        ]
-  }
-}
-
-/**
- * Model NewCookie, a simple tuple type.
- */
-private class NewCookieModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;NewCookie;" +
-        [
-          "true;getComment;;;Argument[-1];ReturnValue;taint",
-          "true;getExpiry;;;Argument[-1];ReturnValue;taint",
-          "true;getMaxAge;;;Argument[-1];ReturnValue;taint",
-          "true;toCookie;;;Argument[-1];ReturnValue;taint",
-          "false;NewCookie;;;Argument[0..9];Argument[-1];taint",
-          "false;valueOf;;;Argument[0];ReturnValue;taint"
-        ]
-  }
-}
-
-/**
- * Model Form, a simple container type.
- */
-private class FormModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;Form;" +
-        [
-          "false;Form;;;MapKey of Argument[0];Argument[-1];taint",
-          "false;Form;;;Element of MapValue of Argument[0];Argument[-1];taint",
-          "false;Form;;;Argument[0..1];Argument[-1];taint",
-          "true;asMap;;;Argument[-1];ReturnValue;taint",
-          "true;param;;;Argument[0..1];Argument[-1];taint",
-          "true;param;;;Argument[-1];ReturnValue;value"
-        ]
-  }
-}
-
-/**
- * Model GenericEntity, a wrapper for HTTP entities (e.g., documents).
- */
-private class GenericEntityModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;GenericEntity;" +
-        [
-          "false;GenericEntity;;;Argument[0];Argument[-1];taint",
-          "true;getEntity;;;Argument[-1];ReturnValue;taint"
-        ]
-  }
-}
-
-/**
- * Model MediaType, which provides accessors for elements of Content-Type and similar
- * media type specifications.
- */
-private class MediaTypeModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;MediaType;" +
-        [
-          "false;MediaType;;;Argument[0..2];Argument[-1];taint",
-          "true;getParameters;;;Argument[-1];ReturnValue;taint",
-          "true;getSubtype;;;Argument[-1];ReturnValue;taint",
-          "true;getType;;;Argument[-1];ReturnValue;taint",
-          "false;valueOf;;;Argument[0];ReturnValue;taint",
-          "true;withCharset;;;Argument[-1];ReturnValue;taint"
-        ]
-  }
-}
-
-/**
- * Model UriBuilder, which provides a fluent interface to build a URI from components.
- */
-private class UriBuilderModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      ["javax", "jakarta"] + ".ws.rs.core;UriBuilder;" +
-        [
-          "true;build;;;ArrayElement of Argument[0];ReturnValue;taint",
-          "true;build;;;Argument[-1];ReturnValue;taint",
-          "true;buildFromEncoded;;;ArrayElement of Argument[0];ReturnValue;taint",
-          "true;buildFromEncoded;;;Argument[-1];ReturnValue;taint",
-          "true;buildFromEncodedMap;;;MapKey of Argument[0];ReturnValue;taint",
-          "true;buildFromEncodedMap;;;MapValue of Argument[0];ReturnValue;taint",
-          "true;buildFromEncodedMap;;;Argument[-1];ReturnValue;taint",
-          "true;buildFromMap;;;MapKey of Argument[0];ReturnValue;taint",
-          "true;buildFromMap;;;MapValue of Argument[0];ReturnValue;taint",
-          "true;buildFromMap;;;Argument[-1];ReturnValue;taint",
-          "true;clone;;;Argument[-1];ReturnValue;taint",
-          "true;fragment;;;Argument[0];ReturnValue;taint",
-          "true;fragment;;;Argument[-1];ReturnValue;value",
-          "false;fromLink;;;Argument[0];ReturnValue;taint",
-          "false;fromPath;;;Argument[0];ReturnValue;taint",
-          "false;fromUri;;;Argument[0];ReturnValue;taint",
-          "true;host;;;Argument[0];ReturnValue;taint", "true;host;;;Argument[-1];ReturnValue;value",
-          "true;matrixParam;;;Argument[0];ReturnValue;taint",
-          "true;matrixParam;;;ArrayElement of Argument[1];ReturnValue;taint",
-          "true;matrixParam;;;Argument[-1];ReturnValue;value",
-          "true;path;;;Argument[0..1];ReturnValue;taint",
-          "true;path;;;Argument[-1];ReturnValue;value",
-          "true;queryParam;;;Argument[0];ReturnValue;taint",
-          "true;queryParam;;;ArrayElement of Argument[1];ReturnValue;taint",
-          "true;queryParam;;;Argument[-1];ReturnValue;value",
-          "true;replaceMatrix;;;Argument[0];ReturnValue;taint",
-          "true;replaceMatrix;;;Argument[-1];ReturnValue;value",
-          "true;replaceMatrixParam;;;Argument[0];ReturnValue;taint",
-          "true;replaceMatrixParam;;;ArrayElement of Argument[1];ReturnValue;taint",
-          "true;replaceMatrixParam;;;Argument[-1];ReturnValue;value",
-          "true;replacePath;;;Argument[0];ReturnValue;taint",
-          "true;replacePath;;;Argument[-1];ReturnValue;value",
-          "true;replaceQuery;;;Argument[0];ReturnValue;taint",
-          "true;replaceQuery;;;Argument[-1];ReturnValue;value",
-          "true;replaceQueryParam;;;Argument[0];ReturnValue;taint",
-          "true;replaceQueryParam;;;ArrayElement of Argument[1];ReturnValue;taint",
-          "true;replaceQueryParam;;;Argument[-1];ReturnValue;value",
-          "true;resolveTemplate;;;Argument[0..2];ReturnValue;taint",
-          "true;resolveTemplate;;;Argument[-1];ReturnValue;value",
-          "true;resolveTemplateFromEncoded;;;Argument[0..1];ReturnValue;taint",
-          "true;resolveTemplateFromEncoded;;;Argument[-1];ReturnValue;value",
-          "true;resolveTemplates;;;MapKey of Argument[0];ReturnValue;taint",
-          "true;resolveTemplates;;;MapValue of Argument[0];ReturnValue;taint",
-          "true;resolveTemplates;;;Argument[-1];ReturnValue;value",
-          "true;resolveTemplatesFromEncoded;;;MapKey of Argument[0];ReturnValue;taint",
-          "true;resolveTemplatesFromEncoded;;;MapValue of Argument[0];ReturnValue;taint",
-          "true;resolveTemplatesFromEncoded;;;Argument[-1];ReturnValue;value",
-          "true;scheme;;;Argument[0];ReturnValue;taint",
-          "true;scheme;;;Argument[-1];ReturnValue;value",
-          "true;schemeSpecificPart;;;Argument[0];ReturnValue;taint",
-          "true;schemeSpecificPart;;;Argument[-1];ReturnValue;value",
-          "true;segment;;;ArrayElement of Argument[0];ReturnValue;taint",
-          "true;segment;;;Argument[-1];ReturnValue;value",
-          "true;toTemplate;;;Argument[-1];ReturnValue;taint",
-          "true;uri;;;Argument[0];ReturnValue;taint", "true;uri;;;Argument[-1];ReturnValue;value",
-          "true;userInfo;;;Argument[0];ReturnValue;taint",
-          "true;userInfo;;;Argument[-1];ReturnValue;value"
-        ]
-  }
-}
-
-private class JaxRsUrlOpenSink extends SinkModelCsv {
-  override predicate row(string row) {
-    row = ["javax", "jakarta"] + ".ws.rs.client;Client;true;target;;;Argument[0];open-url"
-  }
+pragma[nomagic]
+private predicate isXssSafeContentTypeString(string s) {
+  contentTypeString(s) and isXssSafeContentType(s)
 }
 
 private predicate isXssVulnerableContentTypeExpr(Expr e) {
-  isXssVulnerableContentType(getContentTypeString(e))
+  isXssVulnerableContentTypeString(getContentTypeString(e))
 }
 
-private predicate isXssSafeContentTypeExpr(Expr e) { isXssSafeContentType(getContentTypeString(e)) }
+private predicate isXssSafeContentTypeExpr(Expr e) {
+  isXssSafeContentTypeString(getContentTypeString(e))
+}
 
 /**
  * Gets a builder expression or related type that is configured to use the given `contentType`.
@@ -657,7 +467,7 @@ private predicate isXssSafeContentTypeExpr(Expr e) { isXssSafeContentType(getCon
 private DataFlow::Node getABuilderWithExplicitContentType(Expr contentType) {
   // Base case: ResponseBuilder.type(contentType)
   result.asExpr() =
-    any(MethodAccess ma |
+    any(MethodCall ma |
       ma.getCallee().hasQualifiedName(getAJaxRsPackage("core"), "Response$ResponseBuilder", "type") and
       contentType = ma.getArgument(0)
     )
@@ -671,7 +481,7 @@ private DataFlow::Node getABuilderWithExplicitContentType(Expr contentType) {
   or
   // Base case: Variant[.VariantListBuilder].mediaTypes(...)
   result.asExpr() =
-    any(MethodAccess ma |
+    any(MethodCall ma |
       ma.getCallee()
           .hasQualifiedName(getAJaxRsPackage("core"), ["Variant", "Variant$VariantListBuilder"],
             "mediaTypes") and
@@ -680,7 +490,7 @@ private DataFlow::Node getABuilderWithExplicitContentType(Expr contentType) {
   or
   // Recursive case: propagate through variant list building:
   result.asExpr() =
-    any(MethodAccess ma |
+    any(MethodCall ma |
       (
         ma.getType()
             .(RefType)
@@ -695,14 +505,14 @@ private DataFlow::Node getABuilderWithExplicitContentType(Expr contentType) {
   or
   // Recursive case: propagate through a List.get operation
   result.asExpr() =
-    any(MethodAccess ma |
+    any(MethodCall ma |
       ma.getMethod().hasQualifiedName("java.util", "List<Variant>", "get") and
       ma.getQualifier() = getABuilderWithExplicitContentType(contentType).asExpr()
     )
   or
   // Recursive case: propagate through Response.ResponseBuilder operations, including the `variant(...)` operation.
   result.asExpr() =
-    any(MethodAccess ma |
+    any(MethodCall ma |
       ma.getType().(RefType).hasQualifiedName(getAJaxRsPackage("core"), "Response$ResponseBuilder") and
       [ma.getQualifier(), ma.getArgument(0)] =
         getABuilderWithExplicitContentType(contentType).asExpr()
@@ -738,7 +548,7 @@ private class SanitizedResponseBuilder extends XssSanitizer {
     this = getASanitizedBuilder()
     or
     this.asExpr() =
-      any(MethodAccess ma |
+      any(MethodCall ma |
         ma.getMethod().hasQualifiedName(getAJaxRsPackage("core"), "Response", "ok") and
         (
           // e.g. Response.ok(sanitizeMe, new Variant("application/json", ...))
@@ -762,19 +572,19 @@ private class SanitizedResponseBuilder extends XssSanitizer {
 private class VulnerableEntity extends XssSinkBarrier {
   VulnerableEntity() {
     this.asExpr() =
-      any(MethodAccess ma |
+      any(MethodCall ma |
         (
           // Vulnerable content-type already set:
           ma.getQualifier() = getAVulnerableBuilder().asExpr()
           or
           // Vulnerable content-type set in the future:
-          getAVulnerableBuilder().asExpr().(MethodAccess).getQualifier*() = ma
+          getAVulnerableBuilder().asExpr().(MethodCall).getQualifier*() = ma
         ) and
         ma.getMethod().hasName("entity")
       ).getArgument(0)
     or
     this.asExpr() =
-      any(MethodAccess ma |
+      any(MethodCall ma |
         (
           isXssVulnerableContentTypeExpr(ma.getArgument(1))
           or
@@ -782,19 +592,5 @@ private class VulnerableEntity extends XssSinkBarrier {
         ) and
         ma.getMethod().hasName("ok")
       ).getArgument(0)
-  }
-}
-
-/**
- * Model sources stemming from `ContainerRequestContext`.
- */
-private class ContainerRequestContextModel extends SourceModelCsv {
-  override predicate row(string s) {
-    s =
-      ["javax", "jakarta"] + ".ws.rs.container;ContainerRequestContext;true;" +
-        [
-          "getAcceptableLanguages", "getAcceptableMediaTypes", "getCookies", "getEntityStream",
-          "getHeaders", "getHeaderString", "getLanguage", "getMediaType", "getUriInfo"
-        ] + ";;;ReturnValue;remote"
   }
 }

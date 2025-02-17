@@ -14,13 +14,11 @@
  *       external/cwe/cwe-116
  */
 
-import ruby
-import codeql.ruby.security.CodeInjectionQuery
-import DataFlow::PathGraph
+private import codeql.ruby.AST
+private import codeql.ruby.security.CodeInjectionQuery
+import DataFlow::DeduplicatePathGraph<CodeInjectionFlow::PathNode, CodeInjectionFlow::PathGraph>
 
-from Configuration config, DataFlow::PathNode source, DataFlow::PathNode sink, Source sourceNode
-where
-  config.hasFlowPath(source, sink) and
-  sourceNode = source.getNode()
-select sink.getNode(), source, sink, "This code execution depends on $@.", sourceNode,
-  "a user-provided value"
+from PathNode source, PathNode sink
+where CodeInjectionFlow::flowPath(source.getAnOriginalPathNode(), sink.getAnOriginalPathNode())
+select sink.getNode(), source, sink, "This code execution depends on a $@.", source.getNode(),
+  "user-provided value"

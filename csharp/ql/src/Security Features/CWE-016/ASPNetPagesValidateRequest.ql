@@ -3,6 +3,7 @@
  * @description ASP.NET pages should not disable the built-in request validation.
  * @kind problem
  * @problem.severity warning
+ * @precision high
  * @security-severity 7.5
  * @id cs/web/request-validation-disabled
  * @tags security
@@ -13,7 +14,7 @@
 import csharp
 import semmle.code.asp.WebConfig
 
-from SystemWebXMLElement web, XMLAttribute requestvalidateAttribute
+from SystemWebXmlElement web, XmlAttribute requestvalidateAttribute
 where
   requestvalidateAttribute = web.getAChild("pages").getAttribute("validateRequest") and
   requestvalidateAttribute.getValue().toLowerCase() = "false"

@@ -5,7 +5,7 @@
 import javascript
 
 /**
- * Provides classes and predicates modelling the [http-proxy](https://www.npmjs.com/package/http-proxy) library.
+ * Provides classes and predicates modeling the [http-proxy](https://www.npmjs.com/package/http-proxy) library.
  */
 private module HttpProxy {
   /**
@@ -19,10 +19,10 @@ private module HttpProxy {
             .getACall()
     }
 
-    override DataFlow::Node getUrl() { result = getParameter(0).getMember("target").getARhs() }
+    override DataFlow::Node getUrl() { result = this.getParameter(0).getMember("target").asSink() }
 
     override DataFlow::Node getHost() {
-      result = getParameter(0).getMember("target").getMember("host").getARhs()
+      result = this.getParameter(0).getMember("target").getMember("host").asSink()
     }
 
     override DataFlow::Node getADataNode() { none() }
@@ -45,14 +45,16 @@ private module HttpProxy {
         or
         method = "ws" and optionsIndex = 3
       |
-        result = getParameter(optionsIndex)
+        result = this.getParameter(optionsIndex)
       )
     }
 
-    override DataFlow::Node getUrl() { result = getOptionsObject().getMember("target").getARhs() }
+    override DataFlow::Node getUrl() {
+      result = this.getOptionsObject().getMember("target").asSink()
+    }
 
     override DataFlow::Node getHost() {
-      result = getOptionsObject().getMember("target").getMember("host").getARhs()
+      result = this.getOptionsObject().getMember("target").getMember("host").asSink()
     }
 
     override DataFlow::Node getADataNode() { none() }
@@ -74,24 +76,21 @@ private module HttpProxy {
    */
   class ProxyListenerCallback extends NodeJSLib::RouteHandler, DataFlow::FunctionNode {
     string event;
-    API::CallNode call;
 
     ProxyListenerCallback() {
-      call = any(CreateServerCall server).getReturn().getMember(["on", "once"]).getACall() and
-      call.getParameter(0).getARhs().mayHaveStringValue(event) and
-      this = call.getParameter(1).getARhs().getAFunctionValue()
-    }
-
-    override Parameter getRequestParameter() {
-      exists(int req | routeHandlingEventHandler(event, req, _) |
-        result = getFunction().getParameter(req)
+      exists(API::CallNode call |
+        call = any(CreateServerCall server).getReturn().getMember(["on", "once"]).getACall() and
+        call.getParameter(0).asSink().mayHaveStringValue(event) and
+        this = call.getParameter(1).asSink().getAFunctionValue()
       )
     }
 
-    override Parameter getResponseParameter() {
-      exists(int res | routeHandlingEventHandler(event, _, res) |
-        result = getFunction().getParameter(res)
-      )
+    override DataFlow::ParameterNode getRequestParameter() {
+      exists(int req | routeHandlingEventHandler(event, req, _) | result = this.getParameter(req))
+    }
+
+    override DataFlow::ParameterNode getResponseParameter() {
+      exists(int res | routeHandlingEventHandler(event, _, res) | result = this.getParameter(res))
     }
   }
 }
