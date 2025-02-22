@@ -97,3 +97,36 @@ app.get('/foo', (req, res) => {
     obj[req.query.x.replace(/__proto__/g, '')].x = 'foo'; // NOT OK - "__pr__proto__oto__"
     obj[req.query.x.replace('o', '0')].x = 'foo'; // OK
 });
+
+app.get('/bar', (req, res) => {
+    let taint = String(req.query.data);
+
+    let object = {};
+    object[taint][taint] = taint; // NOT OK
+
+    const bad = ["__proto__", "constructor"];
+    if (bad.includes(taint)) {
+        return;
+    }
+
+    object[taint][taint] = taint; // OK
+});
+
+app.get('/assign', (req, res) => {
+    let taint = String(req.query.data);
+    let plainObj = {};
+
+    let object = Object.assign({}, plainObj[taint]);
+    object[taint] = taint; // OK - 'object' is not Object.prototype itself (but possibly a copy)
+
+    let dest = {};
+    Object.assign(dest, plainObj[taint]);
+    dest[taint] = taint; // OK - 'dest' is not Object.prototype itself (but possibly a copy)
+});
+
+app.get('/foo', (req, res) => {
+    let obj = {};
+    obj[req.query.x.replace(new RegExp('_', 'g'), '')].x = 'foo'; // OK
+    obj[req.query.x.replace(new RegExp('_', ''), '')].x = 'foo'; // NOT OK
+    obj[req.query.x.replace(new RegExp('_', unknownFlags()), '')].x = 'foo'; // OK
+});

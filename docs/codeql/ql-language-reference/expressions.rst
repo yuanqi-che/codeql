@@ -117,8 +117,6 @@ The values of the contained expressions need to be of :ref:`compatible types <ty
 Furthermore, at least one of the set elements has to be of a type that is a supertype of the types of all
 the other contained expressions.
 
-Set literals are supported from release 2.1.0 of the CodeQL CLI, and release 1.24 of LGTM Enterprise.
-
 .. index:: super
 .. _super:
 
@@ -151,7 +149,7 @@ Instead of overriding both definitions, it uses the definition from ``B``.
     
     class C extends A, B {
       // Need to define `int getANumber()`; otherwise it would be ambiguous
-      int getANumber() { 
+      override int getANumber() {
         result = B.super.getANumber()
       }
     }
@@ -196,7 +194,7 @@ the **aggregation variables**.
 
 Ordered aggregates (namely ``min``, ``max``, ``rank``, ``concat``, and ``strictconcat``) are
 ordered by their ``<expression>`` values by default. The ordering is either numeric (for 
-integers and floating point numbers) or lexicographic (for strings). Lexicographic ordering is
+numeric types) or lexicographic (for strings). Lexicographic ordering is
 based on the `Unicode value <https://en.wikipedia.org/wiki/List_of_Unicode_characters#Basic_Latin>`_
 of each character.
 
@@ -227,8 +225,9 @@ The following aggregates are available in QL:
 
 - ``min`` and ``max``: These aggregates determine the smallest (``min``) or largest (``max``)
   value of ``<expression>`` among the possible assignments to the aggregation variables. 
-  In this case, ``<expression>`` must be of numeric type or of type ``string``.
-    
+  ``<expression>`` must be of numeric type or of type ``string``, or an explicit order must be defined with ``order by``.
+  When using ``order by``, more than one result may exist in case of ties.
+  
   For example, the following aggregation returns the name of the ``.js`` file (or files) with the 
   largest number of lines, using the number of lines of code to break ties:
 
@@ -297,9 +296,10 @@ The following aggregates are available in QL:
 .. index:: rank
 
 - ``rank``: This aggregate takes the possible values of ``<expression>`` and ranks them. 
-  In this case, ``<expression>`` must be of numeric type or of type ``string``. The aggregation
-  returns the value that is ranked in the position specified by the **rank expression**.
+  ``<expression>`` must be of numeric type or of type ``string``, or an explicit order must be defined with ``order by``.
+  The aggregation returns the value that is ranked in the position specified by the **rank expression**.
   You must include this rank expression in brackets after the keyword ``rank``.
+  When using ``order by``, more than one result may exist in case of ties.
 
   For example, the following aggregation returns the value that is ranked 4th out of all the
   possible values. In this case, ``8`` is the 4th integer in the range from ``5`` through
@@ -338,8 +338,6 @@ The following aggregates are available in QL:
       from int x
       where x in [-5 .. 5] and x != 0
       select unique(int y | y = x or y = x.abs() | y)
-
-  The ``unique`` aggregate is supported from release 2.1.0 of the CodeQL CLI, and release 1.24 of LGTM Enterprise.
 
 Evaluation of aggregates
 ========================
@@ -559,7 +557,7 @@ for a given ``f``.
 In this query, oranges are available at two different prices, and the
 default ``sum`` aggregate returns a single line where Alice buys an
 orange at a price of 100, another orange at a price of 1, and an apple
-at a price of 100, totalling 201. On the other hand, in the the
+at a price of 100, totalling 201. On the other hand, in the 
 *monotonic* semantics for ``sum``, Alice always buys one orange and
 one apple, and a line of output is produced for each *way* she can
 complete her shopping list.
@@ -569,7 +567,7 @@ If there had been two different prices for apples too, the monotonic
 
 Charles wants to buy a banana, which is not for sale at all. In the
 default case, the sum produced for Charles includes the cost of the
-apple he *can* buy, but there's no line for Charles in the monontonic
+apple he *can* buy, but there's no line for Charles in the monotonic
 ``sum`` output, because there *is no way* for Charles to buy one apple
 plus one banana.
 
@@ -584,7 +582,7 @@ case: As long as there's no price for bananas, no output is produced
 for him. This means that if we later do learn of a banana price, we
 don't need to *remove* any output tuple already produced. The
 importance of this is that the monotonic aggregate behavior works well
-with a fixpoint-based semantics for recursion, so it will be meaningul
+with a fixpoint-based semantics for recursion, so it will be meaningful
 to let the ``getPrice`` predicate be mutually recursive with the count
 aggregate itself. (On the other hand, ``getFruit`` still cannot be
 allowed to be recursive, because adding another fruit to someone's
@@ -604,6 +602,7 @@ the distance of a node in a graph from the leaves as follows:
 
 .. code-block:: ql
 
+   language[monotonicAggregates]
    int depth(Node n) {
      if not exists(n.getAChild())
      then result = 0
@@ -685,7 +684,7 @@ Unary operations
 ****************
 
 A unary operation is a minus sign (``-``) or a plus sign (``+``) followed by an expression of type
-``int`` or ``float``. For example:
+``int``, ``float`` or ``QlBuiltins::BigInt``. For example:
 
 .. code-block:: ql
 
@@ -732,10 +731,11 @@ You can use the following binary operators in QL:
 +------------------------+--------+
 
 If both expressions are numbers, these operators act as standard arithmetic operators. For 
-example, ``10.6 - 3.2`` has value ``7.4``, ``123.456 * 0`` has value ``0``, and ``9 % 4`` has 
+example, ``10.6 - 3.2`` has value ``7.4``, ``123.456 * 0`` has value ``0.0``, and ``9 % 4`` has 
 value ``1`` (the remainder after dividing ``9`` by ``4``).
-If both operands are integers, then the result is an integer. Otherwise the result is a 
-floating-point number.
+If both operands are subtypes of ``int`` or ``QlBuiltins::BigInt``, then the result type is
+``int`` or ``QlBuiltins::BigInt``, respectively. Otherwise, if both operands are subtypes of
+``float``, then the result type is ``float``.
 
 You can also use ``+`` as a string concatenation operator. In this case, at least one of the 
 expressions must be a string—the other expression is implicitly converted to a string using the

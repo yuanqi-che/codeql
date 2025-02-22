@@ -15,6 +15,8 @@ import cpp
 from StackVariable v, ControlFlowNode def, VariableAccess checked, VariableAccess unchecked
 where
   checked = v.getAnAccess() and
+  // The check can often be in a macro for handling exception
+  not checked.isInMacroExpansion() and
   dereferenced(checked) and
   unchecked = v.getAnAccess() and
   dereferenced(unchecked) and
@@ -27,4 +29,4 @@ where
     definitionUsePair(v, other, unchecked)
   )
 select unchecked,
-  "This dereference is not guarded by a non-null check, whereas other dereferences are guarded"
+  "This dereference is not guarded by a non-null check, whereas other dereferences are guarded."

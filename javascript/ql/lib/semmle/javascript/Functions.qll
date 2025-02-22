@@ -37,12 +37,18 @@ import javascript
  * ```
  */
 class Function extends @function, Parameterized, TypeParameterized, StmtContainer, Documentable,
-  AST::ValueNode {
+  AST::ValueNode
+{
   /** Gets the `i`th parameter of this function. */
   Parameter getParameter(int i) { result = this.getChildExpr(i) }
 
+  /** Gets the `...rest` parameter, if any. */
+  Parameter getRestParameter() {
+    result = this.getParameter(this.getNumParameter() - 1) and result.isRestParameter()
+  }
+
   /** Gets a parameter of this function. */
-  override Parameter getAParameter() { exists(int idx | result = this.getParameter(idx)) }
+  override Parameter getAParameter() { result = this.getParameter(_) }
 
   /** Gets the parameter named `name` of this function, if any. */
   SimpleParameter getParameterByName(string name) {
@@ -76,13 +82,6 @@ class Function extends @function, Parameterized, TypeParameterized, StmtContaine
     or
     result = this.getDocumentation().getATagByTitle("this").getType()
   }
-
-  /**
-   * DEPRECATED: Use `getIdentifier()` instead.
-   *
-   * Gets the identifier specifying the name of this function, if any.
-   */
-  deprecated VarDecl getId() { result = this.getIdentifier() }
 
   /** Gets the identifier specifying the name of this function, if any. */
   VarDecl getIdentifier() { result = this.getChildExpr(-1) }
@@ -238,7 +237,7 @@ class Function extends @function, Parameterized, TypeParameterized, StmtContaine
 
   override predicate isStrict() {
     // check for explicit strict mode directive
-    exists(StrictModeDecl smd | this = smd.getContainer()) or
+    exists(Directive::StrictModeDecl smd | this = smd.getContainer()) or
     // check for enclosing strict function
     StmtContainer.super.isStrict() or
     // all parts of a class definition are strict code

@@ -3,7 +3,7 @@ import semmle.code.java.frameworks.spring.SpringXMLElement
 import semmle.code.java.frameworks.spring.SpringBean
 
 /** A `<lookup-method>` element in a Spring XML file. */
-class SpringLookupMethod extends SpringXMLElement {
+class SpringLookupMethod extends SpringXmlElement {
   SpringLookupMethod() { this.getName() = "lookup-method" }
 
   /** Gets the value of the `bean` attribute. */
@@ -22,10 +22,8 @@ class SpringLookupMethod extends SpringXMLElement {
    * To find the Java method in a child bean, see `getMethod(SpringBean)`.
    */
   Method getMethod() {
-    exists(RefType superType |
-      this.getEnclosingBean().getClass().hasMethod(result, superType) and
-      result.getName() = this.getMethodName()
-    )
+    this.getEnclosingBean().getClass().hasMethod(result, _) and
+    result.getName() = this.getMethodName()
   }
 
   /**

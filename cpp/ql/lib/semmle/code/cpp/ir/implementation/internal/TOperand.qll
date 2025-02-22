@@ -12,6 +12,9 @@ private import semmle.code.cpp.ir.internal.Overlap
  * Provides the newtype used to represent operands across all phases of the IR.
  */
 private module Internal {
+  private class TAliasedChiInstruction =
+    TAliasedSsaChiInstruction or TAliasedSsaChiAfterUninitializedGroupInstruction;
+
   /**
    * An IR operand. `TOperand` is shared across all phases of the IR. There are branches of this
    * type for operands created directly from the AST (`TRegisterOperand` and `TNonSSAMemoryOperand`),
@@ -23,15 +26,14 @@ private module Internal {
   newtype TOperand =
     // RAW
     TRegisterOperand(TRawInstruction useInstr, RegisterOperandTag tag, TRawInstruction defInstr) {
-      defInstr = RawConstruction::getRegisterOperandDefinition(useInstr, tag) and
-      not RawConstruction::isInCycle(useInstr) and
-      strictcount(RawConstruction::getRegisterOperandDefinition(useInstr, tag)) = 1
+      defInstr = unique( | | RawConstruction::getRegisterOperandDefinition(useInstr, tag)) and
+      not RawConstruction::isInCycle(useInstr)
     } or
     // Placeholder for Phi and Chi operands in stages that don't have the corresponding instructions
     TNoOperand() { none() } or
     // Can be "removed" later when there's unreachable code
     // These operands can be reused across all three stages. They just get different defs.
-    TNonSSAMemoryOperand(Raw::Instruction useInstr, MemoryOperandTag tag) {
+    TNonSsaMemoryOperand(Raw::Instruction useInstr, MemoryOperandTag tag) {
       // Has no definition in raw but will get definitions later
       useInstr.getOpcode().hasOperand(tag)
     } or
@@ -49,11 +51,11 @@ private module Internal {
     // important that we use the same definition of "is variable aliased" across
     // the phases.
     TAliasedPhiOperand(
-      TAliasedSSAPhiInstruction useInstr, Aliased::IRBlock predecessorBlock, Overlap overlap
+      TAliasedSsaPhiInstruction useInstr, Aliased::IRBlock predecessorBlock, Overlap overlap
     ) {
       exists(AliasedConstruction::getPhiOperandDefinition(useInstr, predecessorBlock, overlap))
     } or
-    TAliasedChiOperand(TAliasedSSAChiInstruction useInstr, ChiOperandTag tag) { any() }
+    TAliasedChiOperand(TAliasedChiInstruction useInstr, ChiOperandTag tag) { any() }
 }
 
 /**
@@ -72,13 +74,13 @@ private module Shared {
     result = Internal::TRegisterOperand(useInstr, tag, defInstr)
   }
 
-  class TNonSSAMemoryOperand = Internal::TNonSSAMemoryOperand;
+  class TNonSsaMemoryOperand = Internal::TNonSsaMemoryOperand;
 
   /**
    * Returns the non-Phi memory operand with the specified parameters.
    */
-  TNonSSAMemoryOperand nonSSAMemoryOperand(TRawInstruction useInstr, MemoryOperandTag tag) {
-    result = Internal::TNonSSAMemoryOperand(useInstr, tag)
+  TNonSsaMemoryOperand nonSsaMemoryOperand(TRawInstruction useInstr, MemoryOperandTag tag) {
+    result = Internal::TNonSsaMemoryOperand(useInstr, tag)
   }
 }
 
@@ -95,7 +97,7 @@ module RawOperands {
 
   class TChiOperand = Internal::TNoOperand;
 
-  class TNonPhiMemoryOperand = TNonSSAMemoryOperand or TChiOperand;
+  class TNonPhiMemoryOperand = TNonSsaMemoryOperand or TChiOperand;
 
   /**
    * Returns the Phi operand with the specified parameters.
@@ -126,14 +128,14 @@ module RawOperands {
  * These wrappers are not parameterized because it is not possible to invoke an IPA constructor via
  * a class alias.
  */
-module UnaliasedSSAOperands {
+module UnaliasedSsaOperands {
   import Shared
 
   class TPhiOperand = Internal::TUnaliasedPhiOperand;
 
   class TChiOperand = Internal::TNoOperand;
 
-  class TNonPhiMemoryOperand = TNonSSAMemoryOperand or TChiOperand;
+  class TNonPhiMemoryOperand = TNonSsaMemoryOperand or TChiOperand;
 
   /**
    * Returns the Phi operand with the specified parameters.
@@ -161,18 +163,18 @@ module UnaliasedSSAOperands {
 
 /**
  * Provides wrappers for the constructors of each branch of `TOperand` that is used by the
- * asliased SSA stage.
+ * aliased SSA stage.
  * These wrappers are not parameterized because it is not possible to invoke an IPA constructor via
  * a class alias.
  */
-module AliasedSSAOperands {
+module AliasedSsaOperands {
   import Shared
 
   class TPhiOperand = Internal::TAliasedPhiOperand or Internal::TUnaliasedPhiOperand;
 
   class TChiOperand = Internal::TAliasedChiOperand;
 
-  class TNonPhiMemoryOperand = TNonSSAMemoryOperand or TChiOperand;
+  class TNonPhiMemoryOperand = TNonSsaMemoryOperand or TChiOperand;
 
   /**
    * Returns the Phi operand with the specified parameters.
@@ -199,10 +201,13 @@ module AliasedSSAOperands {
     )
   }
 
+  private class TChiInstruction =
+    TAliasedSsaChiInstruction or TAliasedSsaChiAfterUninitializedGroupInstruction;
+
   /**
    * Returns the Chi operand with the specified parameters.
    */
-  TChiOperand chiOperand(TAliasedSSAChiInstruction useInstr, ChiOperandTag tag) {
+  TChiOperand chiOperand(TChiInstruction useInstr, ChiOperandTag tag) {
     result = Internal::TAliasedChiOperand(useInstr, tag)
   }
 }

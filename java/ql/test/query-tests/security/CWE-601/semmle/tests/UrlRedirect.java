@@ -27,11 +27,11 @@ public class UrlRedirect extends HttpServlet {
 			response.sendRedirect(VALID_REDIRECT);
 		}
 		
-		// FALSE NEGATIVE: the user attempts to clean the string, but this will fail
+		// BAD: the user attempts to clean the string, but this will fail
 		// if the argument is "hthttp://tp://malicious.com"
 		response.sendRedirect(weakCleanup(request.getParameter("target")));
 		
-		// FALSE POSITIVE: the user input is not used in a position that allows it to dictate
+		// GOOD: the user input is not used in a position that allows it to dictate
 		// the target of the redirect
 		response.sendRedirect("http://example.com?username=" + request.getParameter("username"));
 		

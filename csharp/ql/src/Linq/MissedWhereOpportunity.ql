@@ -12,10 +12,10 @@
 import csharp
 import Linq.Helpers
 
-from ForeachStmt fes, IfStmt is
+from ForeachStmtGenericEnumerable fes, IfStmt is
 where
   missedWhereOpportunity(fes, is) and
   not missedAllOpportunity(fes)
 select fes,
-  "This foreach loop implicitly filters its target sequence $@ - consider filtering the sequence explicitly using '.Where(...)'.",
-  is.getCondition(), "here"
+  "This foreach loop $@ - consider filtering the sequence explicitly using '.Where(...)'.",
+  is.getCondition(), "implicitly filters its target sequence"

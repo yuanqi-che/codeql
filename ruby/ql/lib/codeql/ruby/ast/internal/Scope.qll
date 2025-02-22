@@ -1,6 +1,5 @@
 private import TreeSitter
 private import codeql.ruby.AST
-private import codeql.ruby.ast.Scope
 private import codeql.ruby.ast.internal.AST
 private import codeql.ruby.ast.internal.Parameter
 private import codeql.ruby.ast.internal.Variable
@@ -129,7 +128,7 @@ private AstNode specialParentOfInclSynth(AstNode n) {
   n =
     [
       result.(Namespace).getScopeExpr(), result.(ClassDeclaration).getSuperclassExpr(),
-      result.(SingletonMethod).getObject()
+      result.(SingletonMethod).getObject(), result.(SingletonClass).getValue()
     ]
 }
 
@@ -184,9 +183,7 @@ abstract class ScopeImpl extends AstNode, TScopeType {
 }
 
 private class ScopeRealImpl extends ScopeImpl, TScopeReal {
-  private Scope::Range range;
-
-  ScopeRealImpl() { range = toGenerated(this) }
+  ScopeRealImpl() { toGenerated(this) instanceof Scope::Range }
 
   override Variable getAVariableImpl() { result.getDeclaringScope() = this }
 }

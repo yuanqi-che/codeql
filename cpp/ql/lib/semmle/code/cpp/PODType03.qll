@@ -79,17 +79,17 @@ predicate isAggregateType03(Type t) {
  *   user-defined copy assignment operator and no user-defined destructor.
  *   A POD class is a class that is either a POD-struct or a POD-union.
  */
-predicate isPODClass03(Class c) {
+predicate isPodClass03(Class c) {
   isAggregateClass03(c) and
   not exists(Variable v |
     v.getDeclaringType() = c and
     not v.isStatic()
   |
-    not isPODType03(v.getType())
+    not isPodType03(v.getType())
     or
     exists(ArrayType at |
       at = v.getType() and
-      not isPODType03(at.getBaseType())
+      not isPodType03(at.getBaseType())
     )
     or
     v.getType() instanceof ReferenceType
@@ -112,14 +112,14 @@ predicate isPODClass03(Class c) {
  *   such types and cv-qualified versions of these types (3.9.3) are
  *   collectively called POD types.
  */
-predicate isPODType03(Type t) {
+predicate isPodType03(Type t) {
   exists(Type ut | ut = t.getUnderlyingType() |
     isScalarType03(ut)
     or
-    isPODClass03(ut)
+    isPodClass03(ut)
     or
-    exists(ArrayType at | at = ut and isPODType03(at.getBaseType()))
+    exists(ArrayType at | at = ut and isPodType03(at.getBaseType()))
     or
-    isPODType03(ut.(SpecifiedType).getUnspecifiedType())
+    isPodType03(ut.(SpecifiedType).getUnspecifiedType())
   )
 }

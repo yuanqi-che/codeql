@@ -11,6 +11,11 @@ private import semmle.javascript.dataflow.TypeTracking
 private import semmle.javascript.internal.CachedStages
 
 /**
+ * An alias for `SourceNode`.
+ */
+class LocalSourceNode = SourceNode;
+
+/**
  * A source node for local data flow, that is, a node from which local data flow is tracked.
  *
  * This includes function invocations, parameters, object creation, and references to a property or global variable.
@@ -33,13 +38,7 @@ private import semmle.javascript.internal.CachedStages
  * import("fs")
  * ```
  */
-class SourceNode extends DataFlow::Node {
-  SourceNode() {
-    this instanceof SourceNode::Range
-    or
-    none() and this instanceof SourceNode::Internal::RecursionGuard
-  }
-
+class SourceNode extends DataFlow::Node instanceof SourceNode::Range {
   /**
    * Holds if this node flows into `sink` in zero or more local (that is,
    * intra-procedural) steps.
@@ -50,12 +49,12 @@ class SourceNode extends DataFlow::Node {
    * Holds if this node flows into `sink` in zero or more local (that is,
    * intra-procedural) steps.
    */
-  predicate flowsToExpr(Expr sink) { flowsTo(DataFlow::valueNode(sink)) }
+  predicate flowsToExpr(Expr sink) { this.flowsTo(DataFlow::valueNode(sink)) }
 
   /**
    * Gets a node into which data may flow from this node in zero or more local steps.
    */
-  DataFlow::Node getALocalUse() { flowsTo(result) }
+  DataFlow::Node getALocalUse() { this.flowsTo(result) }
 
   /**
    * Gets a reference (read or write) of property `propName` on this node.
@@ -67,13 +66,15 @@ class SourceNode extends DataFlow::Node {
   /**
    * Gets a read of property `propName` on this node.
    */
-  DataFlow::PropRead getAPropertyRead(string propName) { result = getAPropertyReference(propName) }
+  DataFlow::PropRead getAPropertyRead(string propName) {
+    result = this.getAPropertyReference(propName)
+  }
 
   /**
    * Gets a write of property `propName` on this node.
    */
   DataFlow::PropWrite getAPropertyWrite(string propName) {
-    result = getAPropertyReference(propName)
+    result = this.getAPropertyReference(propName)
   }
 
   /**
@@ -82,7 +83,7 @@ class SourceNode extends DataFlow::Node {
    */
   pragma[nomagic]
   predicate hasPropertyWrite(string propName, DataFlow::Node rhs) {
-    rhs = getAPropertyWrite(propName).getRhs()
+    rhs = this.getAPropertyWrite(propName).getRhs()
   }
 
   /**
@@ -97,18 +98,18 @@ class SourceNode extends DataFlow::Node {
   /**
    * Gets a read of any property on this node.
    */
-  DataFlow::PropRead getAPropertyRead() { result = getAPropertyReference() }
+  DataFlow::PropRead getAPropertyRead() { result = this.getAPropertyReference() }
 
   /**
    * Gets a write of any property on this node.
    */
-  DataFlow::PropWrite getAPropertyWrite() { result = getAPropertyReference() }
+  DataFlow::PropWrite getAPropertyWrite() { result = this.getAPropertyReference() }
 
   /**
    * Gets an invocation of the method or constructor named `memberName` on this node.
    */
   DataFlow::InvokeNode getAMemberInvocation(string memberName) {
-    result = getAPropertyRead(memberName).getAnInvocation()
+    result = this.getAPropertyRead(memberName).getAnInvocation()
   }
 
   /**
@@ -118,7 +119,9 @@ class SourceNode extends DataFlow::Node {
    * (as in `o.m(...)`), and calls where the callee undergoes some additional
    * data flow (as in `tmp = o.m; tmp(...)`).
    */
-  DataFlow::CallNode getAMemberCall(string memberName) { result = getAMemberInvocation(memberName) }
+  DataFlow::CallNode getAMemberCall(string memberName) {
+    result = this.getAMemberInvocation(memberName)
+  }
 
   /**
    * Gets a method call that invokes method `methodName` on this node.
@@ -127,7 +130,7 @@ class SourceNode extends DataFlow::Node {
    * that is, `o.m(...)` or `o[p](...)`.
    */
   DataFlow::CallNode getAMethodCall(string methodName) {
-    result = getAMemberInvocation(methodName) and
+    result = this.getAMemberInvocation(methodName) and
     Cached::isSyntacticMethodCall(result)
   }
 
@@ -137,7 +140,7 @@ class SourceNode extends DataFlow::Node {
    * This includes only calls that have the syntactic shape of a method call,
    * that is, `o.m(...)` or `o[p](...)`.
    */
-  DataFlow::CallNode getAMethodCall() { result = getAMethodCall(_) }
+  DataFlow::CallNode getAMethodCall() { result = this.getAMethodCall(_) }
 
   /**
    * Gets a chained method call that invokes `methodName` last.
@@ -146,14 +149,15 @@ class SourceNode extends DataFlow::Node {
    * that is, `o.m(...)` or `o[p](...)`.
    */
   DataFlow::CallNode getAChainedMethodCall(string methodName) {
-    result = getAMethodCall*().getAMethodCall(methodName)
+    // the direct call to `getAMethodCall` is needed in case the base is not a `DataFlow::CallNode`.
+    result = [this.getAMethodCall+().getAMethodCall(methodName), this.getAMethodCall(methodName)]
   }
 
   /**
    * Gets a `new` call that invokes constructor `constructorName` on this node.
    */
   DataFlow::NewNode getAConstructorInvocation(string constructorName) {
-    result = getAMemberInvocation(constructorName)
+    result = this.getAMemberInvocation(constructorName)
   }
 
   /**
@@ -164,24 +168,24 @@ class SourceNode extends DataFlow::Node {
   /**
    * Gets a function call to this node.
    */
-  DataFlow::CallNode getACall() { result = getAnInvocation() }
+  DataFlow::CallNode getACall() { result = this.getAnInvocation() }
 
   /**
    * Gets a `new` call to this node.
    */
-  DataFlow::NewNode getAnInstantiation() { result = getAnInvocation() }
+  DataFlow::NewNode getAnInstantiation() { result = this.getAnInvocation() }
 
   /**
    * Gets a source node whose value is stored in property `prop` of this node.
    */
   DataFlow::SourceNode getAPropertySource(string prop) {
-    result.flowsTo(getAPropertyWrite(prop).getRhs())
+    result.flowsTo(this.getAPropertyWrite(prop).getRhs())
   }
 
   /**
    * Gets a source node whose value is stored in a property of this node.
    */
-  DataFlow::SourceNode getAPropertySource() { result.flowsTo(getAPropertyWrite().getRhs()) }
+  DataFlow::SourceNode getAPropertySource() { result.flowsTo(this.getAPropertyWrite().getRhs()) }
 
   /**
    * Gets a node that this node may flow to using one heap and/or interprocedural step.
@@ -301,13 +305,13 @@ module SourceNode {
    */
   class DefaultRange extends Range {
     DefaultRange() {
-      exists(ASTNode astNode | this = DataFlow::valueNode(astNode) |
+      exists(AstNode astNode | this = DataFlow::valueNode(astNode) |
         astNode instanceof PropAccess or
         astNode instanceof Function or
         astNode instanceof ClassDefinition or
         astNode instanceof ObjectExpr or
         astNode instanceof ArrayExpr or
-        astNode instanceof JSXNode or
+        astNode instanceof JsxNode or
         astNode instanceof GlobalVarAccess or
         astNode instanceof ExternalModuleReference or
         astNode instanceof RegExpLiteral or
@@ -318,6 +322,7 @@ module SourceNode {
         astNode instanceof FunctionBindExpr or
         astNode instanceof DynamicImportExpr or
         astNode instanceof ImportSpecifier or
+        astNode instanceof ExportNamespaceSpecifier or
         astNode instanceof ImportMetaExpr or
         astNode instanceof TaggedTemplateExpr or
         astNode instanceof Templating::PipeRefExpr or
@@ -337,13 +342,9 @@ module SourceNode {
       or
       // Include return nodes because they model the implicit Promise creation in async functions.
       DataFlow::functionReturnNode(this, _)
+      or
+      this instanceof DataFlow::ReflectiveParametersNode
     }
-  }
-
-  /** INTERNAL. DO NOT USE. */
-  module Internal {
-    /** An empty class that some tests are using to enforce that SourceNode is non-recursive. */
-    abstract class RecursionGuard extends DataFlow::Node { }
   }
 }
 
@@ -352,7 +353,7 @@ private class NodeModuleSourcesNodes extends SourceNode::Range {
 
   NodeModuleSourcesNodes() {
     exists(NodeModule m |
-      this = DataFlow::ssaDefinitionNode(SSA::implicitInit(v)) and
+      this = DataFlow::ssaDefinitionNode(Ssa::implicitInit(v)) and
       v = [m.getModuleVariable(), m.getExportsVariable()]
     )
   }
@@ -395,7 +396,3 @@ SourceNode moduleVarNode(Module m) { result.(ModuleVarNode).getModule() = m }
 
 /** Gets the CommonJS/AMD `exports` variable for module `m`. */
 SourceNode exportsVarNode(Module m) { result.(ExportsVarNode).getModule() = m }
-
-deprecated class DefaultSourceNode extends SourceNode {
-  DefaultSourceNode() { this instanceof SourceNode::DefaultRange }
-}

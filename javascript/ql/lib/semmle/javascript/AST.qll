@@ -22,32 +22,28 @@ private import semmle.javascript.internal.CachedStages
  * abs(-42);
  * ```
  */
-class ASTNode extends @ast_node, NodeInStmtContainer {
-  override Location getLocation() { hasLocation(this, result) }
-
+class AstNode extends @ast_node, NodeInStmtContainer {
   override File getFile() {
     result = this.getLocation().getFile() // Specialized for performance reasons
   }
 
   /** Gets the first token belonging to this element. */
   Token getFirstToken() {
-    exists(Location l1, Location l2 |
+    exists(DbLocation l1, DbLocation l2, string filepath, int startline, int startcolumn |
       l1 = this.getLocation() and
       l2 = result.getLocation() and
-      l1.getFile() = l2.getFile() and
-      l1.getStartLine() = l2.getStartLine() and
-      l1.getStartColumn() = l2.getStartColumn()
+      l1.hasLocationInfo(filepath, startline, startcolumn, _, _) and
+      l2.hasLocationInfo(filepath, startline, startcolumn, _, _)
     )
   }
 
   /** Gets the last token belonging to this element. */
   Token getLastToken() {
-    exists(Location l1, Location l2 |
+    exists(DbLocation l1, DbLocation l2, string filepath, int endline, int endcolumn |
       l1 = this.getLocation() and
       l2 = result.getLocation() and
-      l1.getFile() = l2.getFile() and
-      l1.getEndLine() = l2.getEndLine() and
-      l1.getEndColumn() = l2.getEndColumn()
+      l1.hasLocationInfo(filepath, _, _, endline, endcolumn) and
+      l2.hasLocationInfo(filepath, _, _, endline, endcolumn)
     ) and
     // exclude empty EOF token
     not result instanceof EOFToken
@@ -84,7 +80,7 @@ class ASTNode extends @ast_node, NodeInStmtContainer {
    * _Note_: The indices of child nodes are considered an implementation detail and may
    * change between versions of the extractor.
    */
-  ASTNode getChild(int i) {
+  AstNode getChild(int i) {
     result = this.getChildExpr(i) or
     result = this.getChildStmt(i) or
     properties(result, this, i, _, _) or
@@ -101,7 +97,7 @@ class ASTNode extends @ast_node, NodeInStmtContainer {
   TypeExpr getChildTypeExpr(int i) { typeexprs(result, _, this, i, _) }
 
   /** Gets a child node of this node. */
-  ASTNode getAChild() { result = this.getChild(_) }
+  AstNode getAChild() { result = this.getChild(_) }
 
   /** Gets a child expression of this node. */
   Expr getAChildExpr() { result = this.getChildExpr(_) }
@@ -120,7 +116,7 @@ class ASTNode extends @ast_node, NodeInStmtContainer {
 
   /** Gets the parent node of this node, if any. */
   cached
-  ASTNode getParent() { Stages::Ast::ref() and this = result.getAChild() }
+  AstNode getParent() { Stages::Ast::ref() and this = result.getAChild() }
 
   /** Gets the first control flow node belonging to this syntactic entity. */
   ControlFlowNode getFirstControlFlowNode() { result = this }
@@ -249,7 +245,7 @@ class TopLevel extends @toplevel, StmtContainer {
   /** Gets the number of lines containing comments in this toplevel. */
   int getNumberOfLinesOfComments() { numlines(this, _, _, result) }
 
-  override predicate isStrict() { this.getAStmt() instanceof StrictModeDecl }
+  override predicate isStrict() { this.getAStmt() instanceof Directive::StrictModeDecl }
 
   override ControlFlowNode getFirstControlFlowNode() { result = this.getEntry() }
 
@@ -334,7 +330,7 @@ class EventHandlerCode extends @event_handler, CodeInAttribute { }
  * <a href="javascript:alert('hi')">Click me</a>
  * ```
  */
-class JavaScriptURL extends @javascript_url, CodeInAttribute { }
+class JavaScriptUrl extends @javascript_url, CodeInAttribute { }
 
 /**
  * A toplevel syntactic entity containing Closure-style externs definitions.
@@ -361,7 +357,7 @@ class Externs extends TopLevel {
  * i = 9
  * ```
  */
-class ExprOrStmt extends @expr_or_stmt, ControlFlowNode, ASTNode { }
+class ExprOrStmt extends @expr_or_stmt, ControlFlowNode, AstNode { }
 
 /**
  * A program element that contains statements, but isn't itself
@@ -375,7 +371,7 @@ class ExprOrStmt extends @expr_or_stmt, ControlFlowNode, ASTNode { }
  * }
  * ```
  */
-class StmtContainer extends @stmt_container, ASTNode {
+class StmtContainer extends @stmt_container, AstNode {
   /** Gets the innermost enclosing container in which this container is nested. */
   cached
   StmtContainer getEnclosingContainer() { none() }
@@ -405,7 +401,7 @@ class StmtContainer extends @stmt_container, ASTNode {
    * For scripts or modules, this is the container itself; for functions,
    * it is the function body.
    */
-  ASTNode getBody() { result = this }
+  AstNode getBody() { result = this }
 
   /**
    * Gets the (unique) entry node of the control flow graph for this toplevel or function.
@@ -470,7 +466,7 @@ module AST {
    * function id(x) { return x; }    // function declaration
    * ```
    */
-  class ValueNode extends ASTNode, @dataflownode {
+  class ValueNode extends AstNode, @dataflownode {
     /** Gets type inference results for this element. */
     DataFlow::AnalyzedNode analyze() { result = DataFlow::valueNode(this).analyze() }
 

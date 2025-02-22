@@ -44,12 +44,25 @@ class IndexOfCall extends DataFlow::MethodCallNode {
    * Gets an `indexOf` call with the same receiver, argument, and method name, including this call itself.
    */
   IndexOfCall getAnEquivalentIndexOfCall() {
+    result = this
+    or
     exists(DataFlow::Node recv, string m |
       this.receiverAndMethodName(recv, m) and result.receiverAndMethodName(recv, m)
     |
+      // both directly reference the same value
       result.getArgument(0).getALocalSource() = this.getArgument(0).getALocalSource()
       or
+      // both use the same string literal
       result.getArgument(0).getStringValue() = this.getArgument(0).getStringValue()
+      or
+      // both use the same concatenation of a string and a value
+      exists(Expr origin, StringLiteral str, AddExpr otherAdd |
+        this.getArgument(0).asExpr().(AddExpr).hasOperands(origin, str) and
+        otherAdd = result.getArgument(0).asExpr()
+      |
+        otherAdd.getAnOperand().(StringLiteral).getStringValue() = str.getStringValue() and
+        otherAdd.getAnOperand().flow().getALocalSource() = origin.flow().getALocalSource()
+      )
     )
   }
 
@@ -84,7 +97,7 @@ class LiteralLengthExpr extends DotExpr {
 }
 
 /**
- * Holds if `length` is derived from the length of the given `indexOf`-operand.
+ * Holds if `length` is derived from the length of the given indexOf `operand`.
  */
 predicate isDerivedFromLength(DataFlow::Node length, DataFlow::Node operand) {
   exists(IndexOfCall call | operand = call.getAnOperand() |
@@ -123,12 +136,13 @@ predicate isDerivedFromLength(DataFlow::Node length, DataFlow::Node operand) {
  */
 class UnsafeIndexOfComparison extends EqualityTest {
   IndexOfCall indexOf;
-  DataFlow::Node testedValue;
 
   UnsafeIndexOfComparison() {
-    this.hasOperands(indexOf.getAUse(), testedValue.asExpr()) and
-    isDerivedFromLength(testedValue, indexOf.getReceiver()) and
-    isDerivedFromLength(testedValue, indexOf.getArgument(0)) and
+    exists(DataFlow::Node testedValue |
+      this.hasOperands(indexOf.getAUse(), testedValue.asExpr()) and
+      isDerivedFromLength(testedValue, indexOf.getReceiver()) and
+      isDerivedFromLength(testedValue, indexOf.getArgument(0))
+    ) and
     // Ignore cases like `x.indexOf("/") === x.length - 1` that can only be bypassed if `x` is the empty string.
     // Sometimes strings are just known to be non-empty from the context, and it is unlikely to be a security issue,
     // since it's obviously not a domain name check.

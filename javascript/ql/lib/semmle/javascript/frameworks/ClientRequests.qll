@@ -1,5 +1,5 @@
 /**
- * Provides classes for modelling the client-side of a URL request.
+ * Provides classes for modeling the client-side of a URL request.
  *
  * Subclass `ClientRequest` to refine the behavior of the analysis on existing client requests.
  * Subclass `ClientRequest::Range` to introduce new kinds of client requests.
@@ -71,8 +71,6 @@ class ClientRequest extends DataFlow::InvokeNode instanceof ClientRequest::Range
   DataFlow::Node getASavePath() { result = super.getASavePath() }
 }
 
-deprecated class CustomClientRequest = ClientRequest::Range;
-
 module ClientRequest {
   /**
    * A call that performs a request to a URL.
@@ -114,7 +112,7 @@ module ClientRequest {
   /**
    * Gets the name of an HTTP request method, in all-lowercase.
    */
-  private string httpMethodName() { result = any(HTTP::RequestMethodName m).toLowerCase() }
+  private string httpMethodName() { result = any(Http::RequestMethodName m).toLowerCase() }
 
   /**
    * Gets a model of an instance of the `request` library, or one of
@@ -199,6 +197,20 @@ module ClientRequest {
   /** Gets the string `url` or `uri`. */
   private string urlPropertyName() { result = "url" or result = "uri" }
 
+  /** An API entry-point for the global variable `axios`. */
+  private class AxiosGlobalEntryPoint extends API::EntryPoint {
+    AxiosGlobalEntryPoint() { this = "axiosGlobal" }
+
+    override DataFlow::SourceNode getASource() { result = DataFlow::globalVarRef("axios") }
+  }
+
+  /** Gets a reference to the `axios` library. */
+  private API::Node axios() {
+    result = API::moduleImport("axios")
+    or
+    result = API::root().getASuccessor(API::Label::entryPoint(any(AxiosGlobalEntryPoint entry)))
+  }
+
   /**
    * A model of a URL request made using the `axios` library.
    */
@@ -206,9 +218,10 @@ module ClientRequest {
     string method;
 
     AxiosUrlRequest() {
-      this = API::moduleImport("axios").getACall() and method = "request"
+      this = axios().getACall() and
+      method = "request"
       or
-      this = API::moduleImport("axios").getMember(method).getACall() and
+      this = axios().getMember(method).getACall() and
       method = [httpMethodName(), "request"]
     }
 
@@ -267,21 +280,21 @@ module ClientRequest {
       or
       responseType = this.getResponseType() and
       promise = false and
-      result = this.getReturn().getPromisedError().getMember("response").getAnImmediateUse()
+      result = this.getReturn().getPromisedError().getMember("response").asSource()
     }
   }
 
   /** An expression that is used as a credential in a request. */
-  private class AuthorizationHeader extends CredentialsExpr {
+  private class AuthorizationHeader extends CredentialsNode {
     AuthorizationHeader() {
       exists(DataFlow::PropWrite write | write.getPropertyName().regexpMatch("(?i)authorization") |
-        this = write.getRhs().asExpr()
+        this = write.getRhs()
       )
       or
       exists(DataFlow::MethodCallNode call | call.getMethodName() = ["append", "set"] |
         call.getNumArgument() = 2 and
         call.getArgument(0).getStringValue().regexpMatch("(?i)authorization") and
-        this = call.getArgument(1).asExpr()
+        this = call.getArgument(1)
       )
     }
 
@@ -325,15 +338,13 @@ module ClientRequest {
   }
 
   /**
-   * Classes for modelling the url request library `needle`.
+   * Classes for modeling the url request library `needle`.
    */
   private module Needle {
     /**
      * A model of a URL request made using `require("needle")(...)`.
      */
     class PromisedNeedleRequest extends ClientRequest::Range {
-      DataFlow::Node url;
-
       PromisedNeedleRequest() { this = DataFlow::moduleImport("needle").getACall() }
 
       override DataFlow::Node getUrl() { result = this.getArgument(1) }
@@ -463,16 +474,11 @@ module ClientRequest {
   }
 
   /**
-   * Gets an instantiation `socket` of `require("net").Socket` type tracked using `t`.
+   * Gets an instantiation `socket` of `require("net").Socket`.
    */
-  private DataFlow::SourceNode netSocketInstantiation(
-    DataFlow::TypeTracker t, DataFlow::NewNode socket
-  ) {
-    t.start() and
-    socket = DataFlow::moduleMember("net", "Socket").getAnInstantiation() and
-    result = socket
-    or
-    exists(DataFlow::TypeTracker t2 | result = netSocketInstantiation(t2, socket).track(t2, t))
+  private API::Node netSocketInstantiation(DataFlow::NewNode socket) {
+    result = API::moduleImport("net").getMember("Socket").getInstance() and
+    socket = result.asSource()
   }
 
   /**
@@ -481,9 +487,7 @@ module ClientRequest {
   class NetSocketRequest extends ClientRequest::Range {
     DataFlow::NewNode socket;
 
-    NetSocketRequest() {
-      this = netSocketInstantiation(DataFlow::TypeTracker::end(), socket).getAMethodCall("connect")
-    }
+    NetSocketRequest() { this = netSocketInstantiation(socket).getMember("connect").getACall() }
 
     override DataFlow::Node getUrl() {
       result = this.getArgument([0, 1]) // there are multiple overrides of `connect`, and the URL can be in the first or second argument.
@@ -495,7 +499,7 @@ module ClientRequest {
       responseType = "text" and
       promise = false and
       exists(DataFlow::CallNode call |
-        call = netSocketInstantiation(DataFlow::TypeTracker::end(), socket).getAMemberCall("on") and
+        call = netSocketInstantiation(socket).getMember("on").getACall() and
         call.getArgument(0).mayHaveStringValue("data") and
         result = call.getABoundCallbackParameter(1, 0)
       )
@@ -503,7 +507,7 @@ module ClientRequest {
 
     override DataFlow::Node getADataNode() {
       exists(DataFlow::CallNode call |
-        call = netSocketInstantiation(DataFlow::TypeTracker::end(), socket).getAMemberCall("write") and
+        call = netSocketInstantiation(socket).getMember("write").getACall() and
         result = call.getArgument(0)
       )
     }
@@ -555,8 +559,8 @@ module ClientRequest {
    *
    * Note: Prefer to use the `ClientRequest` class as it is more general.
    */
-  class XMLHttpRequest extends ClientRequest::Range {
-    XMLHttpRequest() {
+  class XmlHttpRequest extends ClientRequest::Range {
+    XmlHttpRequest() {
       this = DataFlow::globalVarRef("XMLHttpRequest").getAnInstantiation()
       or
       // closure shim for XMLHttpRequest
@@ -679,7 +683,7 @@ module ClientRequest {
     }
 
     /**
-     * Gets the response type corresponding to `getReponse()` but not
+     * Gets the response type corresponding to `getResponse()` but not
      * for explicitly typed calls like `getResponseJson()`.
      */
     string getAssignedResponseType() {
@@ -713,22 +717,15 @@ module ClientRequest {
    * Gets a reference to an instance of `chrome-remote-interface`.
    *
    * An instantiation of `chrome-remote-interface` either accepts a callback or returns a promise.
-   *
-   * The `isPromise` parameter reflects whether the reference is a promise containing
-   * an instance of `chrome-remote-interface`, or an instance of `chrome-remote-interface`.
    */
-  private DataFlow::SourceNode chromeRemoteInterface(DataFlow::TypeTracker t) {
-    exists(DataFlow::CallNode call |
-      call = DataFlow::moduleImport("chrome-remote-interface").getAnInvocation()
-    |
+  private API::Node chromeRemoteInterface() {
+    exists(API::CallNode call | call = API::moduleImport("chrome-remote-interface").getACall() |
       // the client is inside in a promise.
-      t.startInPromise() and result = call
+      result = call.getReturn().getPromised()
       or
       // the client is accessed directly using a callback.
-      t.start() and result = call.getCallback([0 .. 1]).getParameter(0)
+      result = call.getParameter([0 .. 1]).getParameter(0)
     )
-    or
-    exists(DataFlow::TypeTracker t2 | result = chromeRemoteInterface(t2).track(t2, t))
   }
 
   /**
@@ -738,14 +735,12 @@ module ClientRequest {
     int optionsArg;
 
     ChromeRemoteInterfaceRequest() {
-      exists(DataFlow::SourceNode instance |
-        instance = chromeRemoteInterface(DataFlow::TypeTracker::end())
-      |
+      exists(API::Node instance | instance = chromeRemoteInterface() |
         optionsArg = 0 and
-        this = instance.getAPropertyRead("Page").getAMemberCall("navigate")
+        this = instance.getMember("Page").getMember("navigate").getACall()
         or
         optionsArg = 1 and
-        this = instance.getAMemberCall("send") and
+        this = instance.getMember("send").getACall() and
         this.getArgument(0).mayHaveStringValue("Page.navigate")
       )
     }
@@ -779,14 +774,12 @@ module ClientRequest {
   /**
    * A shell execution of `curl` that downloads some file.
    */
-  class CurlDownload extends ClientRequest::Range {
-    SystemCommandExecution cmd;
-
+  class CurlDownload extends ClientRequest::Range instanceof SystemCommandExecution {
     CurlDownload() {
-      this = cmd and
       (
-        cmd.getACommandArgument().getStringValue() = "curl" or
-        cmd.getACommandArgument()
+        super.getACommandArgument().getStringValue() = "curl" or
+        super
+            .getACommandArgument()
             .(StringOps::ConcatenationRoot)
             .getConstantStringParts()
             .matches("curl %")
@@ -794,8 +787,8 @@ module ClientRequest {
     }
 
     override DataFlow::Node getUrl() {
-      result = cmd.getArgumentList().getALocalSource().getAPropertyWrite().getRhs() or
-      result = cmd.getACommandArgument().(StringOps::ConcatenationRoot).getALeaf()
+      result = super.getArgumentList().getALocalSource().getAPropertyWrite().getRhs() or
+      result = super.getACommandArgument().(StringOps::ConcatenationRoot).getALeaf()
     }
 
     override DataFlow::Node getHost() { none() }
@@ -806,8 +799,8 @@ module ClientRequest {
   /**
    * A model of a URL request made using `jsdom.fromUrl()`.
    */
-  class JSDOMFromUrl extends ClientRequest::Range {
-    JSDOMFromUrl() {
+  class JSDomFromUrl extends ClientRequest::Range {
+    JSDomFromUrl() {
       this = API::moduleImport("jsdom").getMember("JSDOM").getMember("fromURL").getACall()
     }
 
@@ -819,11 +812,11 @@ module ClientRequest {
   }
 
   /**
-   * Classes and predicates modelling the `apollo-client` library.
+   * Classes and predicates modeling the `apollo-client` library.
    */
   private module ApolloClient {
     /**
-     * A function from `apollo-client` that accepts an options object that may contain a `uri` property.
+     * Gets a function from `apollo-client` that accepts an options object that may contain a `uri` property.
      */
     API::Node apolloUriCallee() {
       result = API::moduleImport("apollo-link-http").getMember(["HttpLink", "createHttpLink"])
@@ -841,7 +834,7 @@ module ClientRequest {
     class ApolloClientRequest extends ClientRequest::Range, API::InvokeNode {
       ApolloClientRequest() { this = apolloUriCallee().getAnInvocation() }
 
-      override DataFlow::Node getUrl() { result = this.getParameter(0).getMember("uri").getARhs() }
+      override DataFlow::Node getUrl() { result = this.getParameter(0).getMember("uri").asSink() }
 
       override DataFlow::Node getHost() { none() }
 
@@ -862,10 +855,10 @@ module ClientRequest {
 
     override DataFlow::Node getUrl() { result = this.getArgument(0) }
 
-    override DataFlow::Node getHost() { result = this.getParameter(0).getMember("host").getARhs() }
+    override DataFlow::Node getHost() { result = this.getParameter(0).getMember("host").asSink() }
 
     override DataFlow::Node getADataNode() {
-      result = form.getMember("append").getACall().getParameter(1).getARhs()
+      result = form.getMember("append").getACall().getParameter(1).asSink()
     }
   }
 }

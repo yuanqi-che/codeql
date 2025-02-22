@@ -18,10 +18,15 @@ class Stmt extends Stmt_, AstNode {
   /** Gets an immediate (non-nested) sub-statement of this statement */
   Stmt getASubStatement() { none() }
 
+  /** Gets an immediate (non-nested) sub-pattern of this statement */
+  Pattern getASubPattern() { none() }
+
   override AstNode getAChildNode() {
     result = this.getASubExpression()
     or
     result = this.getASubStatement()
+    or
+    result = this.getASubPattern()
   }
 
   private ControlFlowNode possibleEntryNode() {
@@ -138,12 +143,30 @@ class Exec extends Exec_ {
   override Stmt getASubStatement() { none() }
 }
 
-/** An except statement (part of a `try` statement), such as `except IOError as err:` */
-class ExceptStmt extends ExceptStmt_ {
-  /* syntax: except Expr [ as Expr ]: */
+/**
+ * An exception handler such as an `except` or an `except*` statement
+ * in a `try` statement.
+ */
+class ExceptionHandler extends Stmt {
+  ExceptionHandler() {
+    this instanceof ExceptStmt_
+    or
+    this instanceof ExceptGroupStmt_
+  }
+
   /** Gets the immediately enclosing try statement */
   Try getTry() { result.getAHandler() = this }
 
+  /** Gets the name of this except group block. */
+  abstract Expr getName();
+
+  /** Gets the type of this except group block. */
+  abstract Expr getType();
+}
+
+/** An except group statement (part of a `try` statement), such as `except* IOError as err:` */
+class ExceptGroupStmt extends ExceptGroupStmt_, ExceptionHandler {
+  /* syntax: except Expr [ as Expr ]: */
   override Expr getASubExpression() {
     result = this.getName()
     or
@@ -154,10 +177,34 @@ class ExceptStmt extends ExceptStmt_ {
 
   override Stmt getLastStatement() { result = this.getBody().getLastItem().getLastStatement() }
 
+  override Expr getName() { result = ExceptGroupStmt_.super.getName() }
+
   override Expr getType() {
-    result = super.getType() and not result instanceof Tuple
+    result = ExceptGroupStmt_.super.getType() and not result instanceof Tuple
     or
-    result = super.getType().(Tuple).getAnElt()
+    result = ExceptGroupStmt_.super.getType().(Tuple).getAnElt()
+  }
+}
+
+/** An except statement (part of a `try` statement), such as `except IOError as err:` */
+class ExceptStmt extends ExceptStmt_, ExceptionHandler {
+  /* syntax: except Expr [ as Expr ]: */
+  override Expr getASubExpression() {
+    result = this.getName()
+    or
+    result = this.getType()
+  }
+
+  override Stmt getASubStatement() { result = this.getAStmt() }
+
+  override Stmt getLastStatement() { result = this.getBody().getLastItem().getLastStatement() }
+
+  override Expr getName() { result = ExceptStmt_.super.getName() }
+
+  override Expr getType() {
+    result = ExceptStmt_.super.getType() and not result instanceof Tuple
+    or
+    result = ExceptStmt_.super.getType().(Tuple).getAnElt()
   }
 }
 
@@ -237,7 +284,7 @@ class If extends If_ {
 
   /** Whether this if statement takes the form `if __name__ == "__main__":` */
   predicate isNameEqMain() {
-    exists(StrConst m, Name n, Compare c |
+    exists(StringLiteral m, Name n, Compare c |
       this.getTest() = c and
       c.getOp(0) instanceof Eq and
       (
@@ -318,7 +365,7 @@ class Raise extends Raise_ {
   override Expr getASubExpression() { py_exprs(result, _, this, _) }
 
   /**
-   * The expression immediately following the `raise`, this is the
+   * Gets the expression immediately following the `raise`. This is the
    * exception raised, but not accounting for tuples in Python 2.
    */
   Expr getException() {
@@ -327,7 +374,7 @@ class Raise extends Raise_ {
     result = this.getExc()
   }
 
-  /** The exception raised, accounting for tuples in Python 2. */
+  /** Gets the exception raised, accounting for tuples in Python 2. */
   Expr getRaised() {
     exists(Expr raw | raw = this.getException() |
       if not major_version() = 2 or not exists(raw.(Tuple).getAnElt())
@@ -359,10 +406,15 @@ class Try extends Try_ {
     result = this.getAnOrelse()
   }
 
-  override ExceptStmt getHandler(int i) { result = Try_.super.getHandler(i) }
+  override ExceptionHandler getHandler(int i) { result = Try_.super.getHandler(i) }
 
-  /** Gets an exception handler of this try statement. */
-  override ExceptStmt getAHandler() { result = Try_.super.getAHandler() }
+  override ExceptionHandler getAHandler() { result = Try_.super.getAHandler() }
+
+  /** Gets a normal exception handler, `except`, of this try statement. */
+  ExceptStmt getANormalHandler() { result = this.getAHandler() }
+
+  /** Gets a group exception handler, `except*`, of this try statement. */
+  ExceptGroupStmt getAGroupHandler() { result = this.getAHandler() }
 
   override Stmt getLastStatement() {
     result = this.getFinalbody().getLastItem().getLastStatement()
@@ -410,6 +462,24 @@ class With extends With_ {
   override Stmt getASubStatement() { result = this.getAStmt() }
 
   override Stmt getLastStatement() { result = this.getBody().getLastItem().getLastStatement() }
+}
+
+/** A match statement */
+class MatchStmt extends MatchStmt_ {
+  /* syntax: match subject: */
+  override Expr getASubExpression() { result = this.getSubject() }
+
+  override Stmt getASubStatement() { result = this.getCase(_) }
+}
+
+/** A case statement */
+class Case extends Case_ {
+  /* syntax: case pattern if guard: */
+  override Expr getASubExpression() { result = this.getGuard() }
+
+  override Stmt getASubStatement() { result = this.getStmt(_) }
+
+  override Pattern getASubPattern() { result = this.getPattern() }
 }
 
 /** A plain text used in a template is wrapped in a TemplateWrite statement */

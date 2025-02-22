@@ -52,15 +52,18 @@ class Options extends string {
   /**
    * Holds if a call to this function will never return.
    *
-   * By default, this holds for `exit`, `_exit`, `abort`, `__assert_fail`,
-   * `longjmp`, `__builtin_unreachable` and any function with a
-   * `noreturn` attribute.
+   * By default, this holds for `exit`, `_exit`, `_Exit`, `abort`,
+   * `__assert_fail`, `longjmp`, `__builtin_unreachable` and any
+   * function with a `noreturn`, `__noreturn__`, or `_Noreturn`
+   * attribute or `noreturn` specifier.
    */
   predicate exits(Function f) {
-    f.getAnAttribute().hasName("noreturn")
+    f.getAnAttribute().hasName(["noreturn", "__noreturn__", "_Noreturn"])
+    or
+    f.getASpecifier().hasName("noreturn")
     or
     f.hasGlobalOrStdName([
-        "exit", "_exit", "abort", "__assert_fail", "longjmp", "__builtin_unreachable"
+        "exit", "_exit", "_Exit", "abort", "__assert_fail", "longjmp", "__builtin_unreachable"
       ])
     or
     CustomOptions::exits(f) // old Options.qll
@@ -73,7 +76,7 @@ class Options extends string {
    *   __assume(0);
    * ```
    * (note that in this case if the hint is wrong and the expression is reached at
-   * runtime, the program's behaviour is undefined)
+   * runtime, the program's behavior is undefined)
    */
   predicate exprExits(Expr e) {
     e.(AssumeExpr).getChild(0).(CompileTimeConstantInt).getIntValue() = 0 or

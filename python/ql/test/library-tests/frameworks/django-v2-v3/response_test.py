@@ -1,5 +1,6 @@
 from django.http.response import HttpResponse, HttpResponseRedirect, HttpResponsePermanentRedirect, JsonResponse, HttpResponseNotFound
 from django.views.generic import RedirectView
+from django.views.decorators.csrf import csrf_protect
 import django.shortcuts
 import json
 
@@ -61,7 +62,7 @@ def redirect_through_normal_response(request):
 
     resp = HttpResponse() # $ HttpResponse mimetype=text/html
     resp.status_code = 302
-    resp['Location'] = next # $ MISSING: redirectLocation=next
+    resp['Location'] = next # $ headerWriteName='Location' headerWriteValue=next MISSING: redirectLocation=next
     resp.content = private # $ MISSING: responseBody=private
     return resp
 
@@ -71,7 +72,7 @@ def redirect_through_normal_response_new_headers_attr(request):
 
     resp = HttpResponse() # $ HttpResponse mimetype=text/html
     resp.status_code = 302
-    resp.headers['Location'] = next # $ MISSING: redirectLocation=next
+    resp.headers['Location'] = next # $ headerWriteName='Location' headerWriteValue=next MISSING: redirectLocation=next
     resp.content = private # $ MISSING: responseBody=private
     return resp
 
@@ -117,6 +118,7 @@ class CustomJsonResponse(JsonResponse):
     def __init__(self, banner, content, *args, **kwargs):
         super().__init__(content, *args, content_type="text/html", **kwargs)
 
+@csrf_protect  # $CsrfLocalProtectionEnabled=safe__custom_json_response
 def safe__custom_json_response(request):
     return CustomJsonResponse("ACME Responses", {"foo": request.GET.get("foo")})  # $HttpResponse mimetype=application/json MISSING: responseBody=Dict SPURIOUS: responseBody="ACME Responses"
 
@@ -126,10 +128,14 @@ def safe__custom_json_response(request):
 
 def setting_cookie(request):
     resp = HttpResponse() # $ HttpResponse mimetype=text/html
-    resp.set_cookie("key", "value") # $ CookieWrite CookieName="key" CookieValue="value"
-    resp.set_cookie(key="key", value="value") # $ CookieWrite CookieName="key" CookieValue="value"
-    resp.headers["Set-Cookie"] = "key2=value2" # $ MISSING: CookieWrite CookieRawHeader="key2=value2"
+    resp.set_cookie("key", "value") # $ CookieWrite CookieName="key" CookieValue="value" CookieSecure=false CookieHttpOnly=false CookieSameSite=Lax
+    resp.set_cookie(key="key", value="value") # $ CookieWrite CookieName="key" CookieValue="value" CookieSecure=false CookieHttpOnly=false CookieSameSite=Lax
+    resp.headers["Set-Cookie"] = "key2=value2" # $ headerWriteName="Set-Cookie" headerWriteValue="key2=value2" CookieWrite CookieRawHeader="key2=value2" CookieSecure=false CookieHttpOnly=false CookieSameSite=Lax
     resp.cookies["key3"] = "value3" # $ CookieWrite CookieName="key3" CookieValue="value3"
     resp.delete_cookie("key4") # $ CookieWrite CookieName="key4"
     resp.delete_cookie(key="key4") # $ CookieWrite CookieName="key4"
+    resp["Set-Cookie"] = "key5=value5" # $ headerWriteName="Set-Cookie" headerWriteValue="key5=value5" CookieWrite CookieRawHeader="key5=value5" CookieSecure=false CookieHttpOnly=false CookieSameSite=Lax
+    resp.set_cookie(key="key6", value="value6", secure=True, httponly=False, samesite="None") # $ CookieWrite CookieName="key6" CookieValue="value6" CookieSecure=true CookieHttpOnly=false CookieSameSite=None 
+    kwargs = {'secure': True}
+    resp.set_cookie(key="key7", value="value7", **kwargs) # $ CookieWrite CookieName="key7" CookieValue="value7"
     return resp

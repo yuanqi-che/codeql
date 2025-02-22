@@ -2,16 +2,16 @@
 
 import semmle.code.java.Type
 
-library class JAXBElement extends Class {
-  JAXBElement() {
-    this.getASupertype*().getQualifiedName() = "javax.xml.bind.JAXBElement" or
+class JaxbElement extends Class {
+  JaxbElement() {
+    this.getAnAncestor().hasQualifiedName("javax.xml.bind", "JAXBElement") or
     this.getAnAnnotation().getType().getName() = "XmlRootElement"
   }
 }
 
-library class JAXBMarshalMethod extends Method {
-  JAXBMarshalMethod() {
-    this.getDeclaringType().getQualifiedName() = "javax.xml.bind.Marshaller" and
+class JaxbMarshalMethod extends Method {
+  JaxbMarshalMethod() {
+    this.getDeclaringType().hasQualifiedName("javax.xml.bind", "Marshaller") and
     this.getName() = "marshal"
   }
 }
@@ -54,7 +54,7 @@ class JaxbType extends Class {
       this.getAnAnnotation() = a and
       a.getType().(JaxbAnnotationType).hasName("XmlAccessorType")
     |
-      result.getAnAccess() = a.getValue("value")
+      result = a.getEnumConstantValue("value")
     )
   }
 
@@ -145,7 +145,7 @@ class JaxbBoundField extends Field {
 /**
  * A getter or setter method, as defined by whether the method name starts with "set" or "get".
  */
-library class GetterOrSetterMethod extends Method {
+class GetterOrSetterMethod extends Method {
   GetterOrSetterMethod() { this.getName().matches("get%") or this.getName().matches("set%") }
 
   Field getField() {

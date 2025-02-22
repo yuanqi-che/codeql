@@ -7,8 +7,9 @@
  */
 
 private import AST
-private import codeql.ruby.security.performance.RegExpTreeView as RETV
+private import codeql.ruby.Regexp as RE
 private import codeql.ruby.ast.internal.Synthesis
+private import ast.internal.AST
 
 /**
  * The query can extend this class to control which nodes are printed.
@@ -37,7 +38,7 @@ private predicate shouldPrintAstEdge(AstNode parent, string edgeName, AstNode ch
 
 newtype TPrintNode =
   TPrintRegularAstNode(AstNode n) { shouldPrintNode(n) } or
-  TPrintRegExpNode(RETV::RegExpTerm term) {
+  TPrintRegExpNode(RE::RegExpTerm term) {
     exists(RegExpLiteral literal |
       shouldPrintNode(literal) and
       term.getRootTerm() = literal.getParsed()
@@ -67,7 +68,7 @@ class PrintAstNode extends TPrintNode {
    * Holds if this node is at the specified location. The location spans column
    * `startcolumn` of line `startline` to column `endcolumn` of line `endline`
    * in file `filepath`. For more information, see
-   * [LGTM locations](https://codeql.github.com/docs/writing-codeql-queries/providing-locations-in-codeql-queries/).
+   * [Locations](https://codeql.github.com/docs/writing-codeql-queries/providing-locations-in-codeql-queries/).
    */
   predicate hasLocationInfo(
     string filepath, int startline, int startcolumn, int endline, int endcolumn
@@ -107,9 +108,28 @@ class PrintRegularAstNode extends PrintAstNode, TPrintRegularAstNode {
     or
     // If this AST node is a regexp literal, add the parsed regexp tree as a
     // child.
-    exists(RETV::RegExpTerm t | t = astNode.(RegExpLiteral).getParsed() |
+    exists(RE::RegExpTerm t | t = astNode.(RegExpLiteral).getParsed() |
       result = TPrintRegExpNode(t) and edgeName = "getParsed"
     )
+  }
+
+  private predicate parentIsSynthesized() {
+    exists(AstNode parent |
+      shouldPrintAstEdge(parent, _, astNode) and
+      parent.isSynthesized()
+    )
+  }
+
+  private int getSynthAstNodeIndex() {
+    this.parentIsSynthesized() and
+    exists(AstNode parent |
+      shouldPrintAstEdge(parent, _, astNode) and
+      parent.isSynthesized() and
+      synthChild(parent, result, astNode)
+    )
+    or
+    not this.parentIsSynthesized() and
+    result = 0
   }
 
   override int getOrder() {
@@ -118,7 +138,10 @@ class PrintRegularAstNode extends PrintAstNode, TPrintRegularAstNode {
         l = p.getLocation() and
         f = l.getFile()
       |
-        p order by f.getBaseName(), f.getAbsolutePath(), l.getStartLine(), l.getStartColumn()
+        p
+        order by
+          f.getBaseName(), f.getAbsolutePath(), l.getStartLine(), p.getSynthAstNodeIndex(),
+          l.getStartColumn(), l.getEndLine(), l.getEndColumn()
       )
   }
 
@@ -134,7 +157,7 @@ class PrintRegularAstNode extends PrintAstNode, TPrintRegularAstNode {
 
 /** A parsed regexp node in the output tree. */
 class PrintRegExpNode extends PrintAstNode, TPrintRegExpNode {
-  RETV::RegExpTerm regexNode;
+  RE::RegExpTerm regexNode;
 
   PrintRegExpNode() { this = TPrintRegExpNode(regexNode) }
 
@@ -147,7 +170,7 @@ class PrintRegExpNode extends PrintAstNode, TPrintRegExpNode {
     exists(int i | result = TPrintRegExpNode(regexNode.getChild(i)) and edgeName = i.toString())
   }
 
-  override int getOrder() { exists(RETV::RegExpTerm p | p.getChild(result) = regexNode) }
+  override int getOrder() { exists(RE::RegExpTerm p | p.getChild(result) = regexNode) }
 
   override predicate hasLocationInfo(
     string filepath, int startline, int startcolumn, int endline, int endcolumn

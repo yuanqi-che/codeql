@@ -7,12 +7,15 @@ private import python
 private import semmle.python.dataflow.new.DataFlow
 private import semmle.python.Concepts
 private import semmle.python.ApiGraphs
+private import semmle.python.frameworks.data.ModelsAsData
 
 /**
+ * INTERNAL: Do not use.
+ *
  * Provides models for the `invoke` PyPI package.
  * See https://www.pyinvoke.org/.
  */
-private module Invoke {
+module Invoke {
   // ---------------------------------------------------------------------------
   // invoke
   // ---------------------------------------------------------------------------
@@ -20,29 +23,29 @@ private module Invoke {
   API::Node invoke() { result = API::moduleImport("invoke") }
 
   /** Provides models for the `invoke` module. */
-  module invoke {
-    /** Gets a reference to the `invoke.context` module. */
-    API::Node context() { result = invoke().getMember("context") }
-
+  module InvokeModule {
     /** Provides models for the `invoke.context` module */
-    module context {
+    module Context {
       /** Provides models for the `invoke.context.Context` class */
-      module Context {
+      module ContextClass {
         /** Gets a reference to the `invoke.context.Context` class. */
         API::Node classRef() {
           result = API::moduleImport("invoke").getMember("context").getMember("Context")
           or
           result = API::moduleImport("invoke").getMember("Context")
+          or
+          result = ModelOutput::getATypeNode("invoke.context.Context~Subclass").getASubclass*()
         }
 
         /** Gets a reference to an instance of `invoke.context.Context`. */
         private DataFlow::TypeTrackingNode instance(DataFlow::TypeTracker t) {
           t.start() and
           (
-            result = invoke::context::Context::classRef().getACall()
+            result = InvokeModule::Context::ContextClass::classRef().getACall()
             or
             exists(Function func |
-              func.getADecorator() = invoke().getMember("task").getAUse().asExpr() and
+              func.getADecorator() =
+                invoke().getMember("task").getAValueReachableFromSource().asExpr() and
               result.(DataFlow::ParameterNode).getParameter() = func.getArg(0)
             )
           )
@@ -56,7 +59,7 @@ private module Invoke {
         /** Gets a reference to the `run` or `sudo` methods on a `invoke.context.Context` instance. */
         private DataFlow::TypeTrackingNode instanceRunMethods(DataFlow::TypeTracker t) {
           t.startInAttr(["run", "sudo"]) and
-          result = invoke::context::Context::instance()
+          result = InvokeModule::Context::ContextClass::instance()
           or
           exists(DataFlow::TypeTracker t2 | result = instanceRunMethods(t2).track(t2, t))
         }
@@ -77,11 +80,13 @@ private module Invoke {
   private class InvokeRunCommandCall extends SystemCommandExecution::Range, DataFlow::CallCfgNode {
     InvokeRunCommandCall() {
       this = invoke().getMember(["run", "sudo"]).getACall() or
-      this.getFunction() = invoke::context::Context::instanceRunMethods()
+      this.getFunction() = InvokeModule::Context::ContextClass::instanceRunMethods()
     }
 
     override DataFlow::Node getCommand() {
       result in [this.getArg(0), this.getArgByName("command")]
     }
+
+    override predicate isShellInterpreted(DataFlow::Node arg) { arg = this.getCommand() }
   }
 }

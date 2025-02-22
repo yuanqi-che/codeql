@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import subprocess
 import json
 import csv
@@ -8,14 +10,14 @@ import argparse
 
 """
 This script collects CodeQL queries that are part of code scanning query packs
-and prints CSV data to stdout that describes which packs contain which queries.
+and prints CSV data to stdout that describes which suites in the pack contain which queries.
 
 Errors are printed to stderr. This script requires that 'git' and 'codeql' commands
 are on the PATH. It'll try to automatically set the CodeQL search path correctly,
 as long as you run the script from one of the following locations:
  - anywhere from within a clone of the CodeQL Git repo
  - from the parent directory of a clone of the CodeQL Git repo (assuming 'codeql'
-   and 'codeql-go' directories both exist)
+   directory exists)
 """
 
 parser = argparse.ArgumentParser(__name__)
@@ -28,8 +30,8 @@ arguments = parser.parse_args()
 assert hasattr(arguments, "ignore_missing_query_packs")
 
 # Define which languages and query packs to consider
-languages = [ "cpp", "csharp", "go", "java", "javascript", "python", "ruby"]
-packs = [ "code-scanning", "security-and-quality", "security-extended" ]
+languages = [ "actions", "cpp", "csharp", "go", "java", "javascript", "python", "ruby", "swift" ]
+packs = [ "code-scanning", "security-and-quality", "security-extended", "security-experimental", "ccr"]
 
 class CodeQL:
     def __init__(self):
@@ -52,7 +54,7 @@ class CodeQL:
         except:
             self.proc.kill()
 
-    def command(self, args): 
+    def command(self, args):
         data = json.dumps(args)
         data_bytes = data.encode('utf-8')
         self.proc.stdin.write(data_bytes)
@@ -75,7 +77,7 @@ def prefix_repo_nwo(filename):
     becomes:
         github/codeql/java/ql/src/MyQuery.ql
 
-    If we can't detect a known NWO (e.g. github/codeql, github/codeql-go), the
+    If we can't detect a known NWO (e.g. github/codeql), the
     path will be truncated to the root of the git repo:
         ql/java/ql/src/MyQuery.ql
 
@@ -92,13 +94,12 @@ def prefix_repo_nwo(filename):
 
     git_toplevel_dir = git_toplevel_dir_subp.stdout.strip()
 
-    # Detect 'github/codeql' and 'github/codeql-go' repositories by checking the remote (it's a bit
-    # of a hack but will work in most cases, as long as the remotes have 'codeql' and 'codeql-go'
+    # Detect 'github/codeql' repository by checking the remote (it's a bit
+    # of a hack but will work in most cases, as long as the remotes have 'codeql'
     # in the URL
     git_remotes = subprocess_run(["git","-C",dirname,"remote","-v"]).stdout.strip()
 
-    if "codeql-go" in git_remotes: prefix = "github/codeql-go"
-    elif "codeql" in git_remotes: prefix = "github/codeql"
+    if "codeql" in git_remotes: prefix = "github/codeql"
     else: prefix = os.path.basename(git_toplevel_dir)
 
     return os.path.join(prefix, filename[len(git_toplevel_dir)+1:])
@@ -142,9 +143,7 @@ with CodeQL() as codeql:
         # Define CodeQL search path so it'll find the CodeQL repositories:
         #  - anywhere in the current Git clone (including current working directory)
         #  - the 'codeql' subdirectory of the cwd
-        #
-        # (and assumes the codeql-go repo is in a similar location)
-        codeql_search_path = "./codeql:./codeql-go:."   # will be extended further down
+        codeql_search_path = "./codeql:."   # will be extended further down
 
         # Extend CodeQL search path by detecting root of the current Git repo (if any). This means that you
         # can run this script from any location within the CodeQL git repository.
@@ -153,7 +152,7 @@ with CodeQL() as codeql:
 
             # Current working directory is in a Git repo. Add it to the search path, just in case it's the CodeQL repo
             git_toplevel_dir = git_toplevel_dir.stdout.strip()
-            codeql_search_path += ":" + git_toplevel_dir + ":" + git_toplevel_dir + "/../codeql-go"
+            codeql_search_path += ":" + git_toplevel_dir
         except:
             # git rev-parse --show-toplevel exited with non-zero exit code. We're not in a Git repo
             pass
@@ -162,7 +161,7 @@ with CodeQL() as codeql:
         csvwriter = csv.writer(sys.stdout)
         csvwriter.writerow([
             "Query filename", "Suite", "Query name", "Query ID",
-            "Kind", "Severity", "Precision", "Tags"
+            "Kind", "Severity", "Precision", "Tags", "Security score"
         ])
 
         # Iterate over all languages and packs, and resolve which queries are part of those packs
@@ -170,9 +169,9 @@ with CodeQL() as codeql:
             for pack in packs:
                 # Get absolute paths to queries in this pack by using 'codeql resolve queries'
                 try:
-                    queries_subp = codeql.command(["resolve","queries","--search-path", codeql_search_path, "%s-%s.qls" % (lang, pack)])
+                    queries_subp = codeql.command(["resolve","queries","--search-path", codeql_search_path, "%s-%s.qls" % (lang, pack)]).strip()
                 except Exception as e:
-                    # Resolving queries might go wrong if the github/codeql and github/codeql-go repositories are not
+                    # Resolving queries might go wrong if the github/codeql repository is not
                     # on the search path.
                     level = "Warning" if arguments.ignore_missing_query_packs else "Error"
                     print(
@@ -184,8 +183,13 @@ with CodeQL() as codeql:
                     else:
                         sys.exit("You can use '--ignore-missing-query-packs' to ignore this error")
 
+                # Exception for the CCR suites, which might be empty, but must be resolvable.
+                if pack == 'ccr' and queries_subp == '':
+                    print(f'Warning: skipping empty suite ccr', file=sys.stderr)
+                    continue
+
                 # Investigate metadata for every query by using 'codeql resolve metadata'
-                for queryfile in queries_subp.strip().split("\n"):
+                for queryfile in queries_subp.split("\n"):
                     query_metadata_json = codeql.command(["resolve","metadata",queryfile]).strip()
 
                     # Turn an absolute path to a query file into an nwo-prefixed path (e.g. github/codeql/java/ql/src/....)
@@ -201,5 +205,6 @@ with CodeQL() as codeql:
                         get_query_metadata('kind', meta, queryfile_nwo),
                         get_query_metadata('problem.severity', meta, queryfile_nwo),
                         get_query_metadata('precision', meta, queryfile_nwo),
-                        get_query_metadata('tags', meta, queryfile_nwo)
+                        get_query_metadata('tags', meta, queryfile_nwo),
+                        get_query_metadata('security-severity', meta, queryfile_nwo),
                     ])

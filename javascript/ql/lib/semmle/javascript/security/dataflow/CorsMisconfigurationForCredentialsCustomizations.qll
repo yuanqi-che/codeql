@@ -19,7 +19,7 @@ module CorsMisconfigurationForCredentials {
     /**
      * Gets the "Access-Control-Allow-Credentials" header definition.
      */
-    abstract HTTP::HeaderDefinition getCredentialsHeader();
+    abstract Http::HeaderDefinition getCredentialsHeader();
   }
 
   /**
@@ -27,12 +27,16 @@ module CorsMisconfigurationForCredentials {
    */
   abstract class Sanitizer extends DataFlow::Node { }
 
-  /** A source of remote user input, considered as a flow source for CORS misconfiguration. */
-  class RemoteFlowSourceAsSource extends Source {
-    RemoteFlowSourceAsSource() {
-      this instanceof RemoteFlowSource and
-      not this instanceof ClientSideRemoteFlowSource
-    }
+  /**
+   * DEPRECATED: Use `ActiveThreatModelSource` from Concepts instead!
+   */
+  deprecated class RemoteFlowSourceAsSource = ActiveThreatModelSourceAsSource;
+
+  /**
+   * An active threat-model source, considered as a flow source.
+   */
+  private class ActiveThreatModelSourceAsSource extends Source instanceof ActiveThreatModelSource {
+    ActiveThreatModelSourceAsSource() { not this.isClientSideSource() }
   }
 
   /**
@@ -41,24 +45,24 @@ module CorsMisconfigurationForCredentials {
    * HTTP header with a truthy value.
    */
   class CorsOriginHeaderWithAssociatedCredentialHeader extends Sink, DataFlow::ValueNode {
-    HTTP::ExplicitHeaderDefinition credentials;
+    Http::ExplicitHeaderDefinition credentials;
 
     CorsOriginHeaderWithAssociatedCredentialHeader() {
       exists(
-        HTTP::RouteHandler routeHandler, HTTP::ExplicitHeaderDefinition origin,
-        Expr credentialsValue
+        Http::RouteHandler routeHandler, Http::ExplicitHeaderDefinition origin,
+        DataFlow::Node credentialsValue
       |
         routeHandler.getAResponseHeader(_) = origin and
         routeHandler.getAResponseHeader(_) = credentials and
-        origin.definesExplicitly("access-control-allow-origin", this.asExpr()) and
-        credentials.definesExplicitly("access-control-allow-credentials", credentialsValue)
+        origin.definesHeaderValue("access-control-allow-origin", this) and
+        credentials.definesHeaderValue("access-control-allow-credentials", credentialsValue)
       |
         credentialsValue.mayHaveBooleanValue(true) or
         credentialsValue.mayHaveStringValue("true")
       )
     }
 
-    override HTTP::HeaderDefinition getCredentialsHeader() { result = credentials }
+    override Http::HeaderDefinition getCredentialsHeader() { result = credentials }
   }
 
   /**

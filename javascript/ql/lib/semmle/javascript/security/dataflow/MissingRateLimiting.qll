@@ -30,10 +30,6 @@ private import semmle.javascript.frameworks.ConnectExpressShared::ConnectExpress
  * A route handler that should be rate-limited.
  */
 abstract class ExpensiveRouteHandler extends DataFlow::Node {
-  Express::RouteHandler impl;
-
-  ExpensiveRouteHandler() { this = impl }
-
   /**
    * Holds if `explanation` is a string explaining why this route handler should be rate-limited.
    *
@@ -43,11 +39,6 @@ abstract class ExpensiveRouteHandler extends DataFlow::Node {
    */
   abstract predicate explain(string explanation, DataFlow::Node reference, string referenceLabel);
 }
-
-/**
- * A route handler expression that is rate limited.
- */
-abstract class RateLimitedRouteHandlerExpr extends Express::RouteHandlerExpr { }
 
 // default implementations
 /**
@@ -78,53 +69,28 @@ abstract class ExpensiveAction extends DataFlow::Node {
 }
 
 /** A call to an authorization function, considered as an expensive action. */
-class AuthorizationCallAsExpensiveAction extends ExpensiveAction {
-  AuthorizationCallAsExpensiveAction() { this instanceof AuthorizationCall }
-
+class AuthorizationCallAsExpensiveAction extends ExpensiveAction instanceof AuthorizationCall {
   override string describe() { result = "authorization" }
 }
 
 /** A file system access, considered as an expensive action. */
-class FileSystemAccessAsExpensiveAction extends ExpensiveAction {
-  FileSystemAccessAsExpensiveAction() { this instanceof FileSystemAccess }
-
+class FileSystemAccessAsExpensiveAction extends ExpensiveAction instanceof FileSystemAccess {
   override string describe() { result = "a file system access" }
 }
 
 /** A system command execution, considered as an expensive action. */
-class SystemCommandExecutionAsExpensiveAction extends ExpensiveAction {
-  SystemCommandExecutionAsExpensiveAction() { this instanceof SystemCommandExecution }
-
+class SystemCommandExecutionAsExpensiveAction extends ExpensiveAction instanceof SystemCommandExecution
+{
   override string describe() { result = "a system command" }
 }
 
 /** A database access, considered as an expensive action. */
-class DatabaseAccessAsExpensiveAction extends ExpensiveAction {
-  DatabaseAccessAsExpensiveAction() { this instanceof DatabaseAccess }
-
+class DatabaseAccessAsExpensiveAction extends ExpensiveAction instanceof DatabaseAccess {
   override string describe() { result = "a database access" }
 }
 
 /**
- * A route handler expression that is rate-limited by a rate-limiting middleware.
- */
-class RouteHandlerExpressionWithRateLimiter extends RateLimitedRouteHandlerExpr {
-  RouteHandlerExpressionWithRateLimiter() {
-    any(RateLimitingMiddleware m).ref().flowsToExpr(this.getAMatchingAncestor())
-  }
-}
-
-/**
- * DEPRECATED. Use `RateLimitingMiddleware` instead.
- *
- * A middleware that acts as a rate limiter.
- */
-deprecated class RateLimiter extends Express::RouteHandlerExpr {
-  RateLimiter() { any(RateLimitingMiddleware m).ref().flowsToExpr(this) }
-}
-
-/**
- * Creation of a middleware function that acts as a rate limiter.
+ * The creation of a middleware function that acts as a rate limiter.
  */
 abstract class RateLimitingMiddleware extends DataFlow::SourceNode {
   /** Gets a data flow node referring to this middleware. */
@@ -139,6 +105,9 @@ abstract class RateLimitingMiddleware extends DataFlow::SourceNode {
 
   /** Gets a data flow node referring to this middleware. */
   DataFlow::SourceNode ref() { result = this.ref(DataFlow::TypeTracker::end()) }
+
+  /** Gets a routing node corresponding to this middleware function. */
+  Routing::Node getRoutingNode() { result = Routing::getNode(this) }
 }
 
 /**
@@ -146,7 +115,11 @@ abstract class RateLimitingMiddleware extends DataFlow::SourceNode {
  */
 class ExpressRateLimit extends RateLimitingMiddleware {
   ExpressRateLimit() {
-    this = API::moduleImport("express-rate-limit").getReturn().getAnImmediateUse()
+    this =
+      [
+        API::moduleImport("express-rate-limit"),
+        API::moduleImport("express-rate-limit").getMember("rateLimit")
+      ].getReturn().asSource()
   }
 }
 
@@ -155,17 +128,26 @@ class ExpressRateLimit extends RateLimitingMiddleware {
  */
 class BruteForceRateLimit extends RateLimitingMiddleware {
   BruteForceRateLimit() {
-    this = API::moduleImport("express-brute").getInstance().getMember("prevent").getAnImmediateUse()
+    this = API::moduleImport("express-brute").getInstance().getMember("prevent").asSource()
   }
 }
 
 /**
- * A route handler expression that is rate-limited by the `express-limiter` package.
+ * A rate limiter constructed using the `express-limiter` package.
+ *
+ * Note that the `express-limiter` package is unusual in that it may optionally install itself as a middleware.
+ * That aspect is handled by the Express core model.
  */
-class RouteHandlerLimitedByExpressLimiter extends RateLimitedRouteHandlerExpr {
+class RouteHandlerLimitedByExpressLimiter extends RateLimitingMiddleware {
   RouteHandlerLimitedByExpressLimiter() {
-    API::moduleImport("express-limiter").getParameter(0).getARhs().getALocalSource().asExpr() =
-      this.getSetup().getRouter()
+    this = API::moduleImport("express-limiter").getReturn().getReturn().asSource()
+  }
+
+  override Routing::Node getRoutingNode() {
+    result = super.getRoutingNode()
+    or
+    // express-limiter can perform its own route setup
+    result = Routing::getRouteSetupNode(this)
   }
 }
 
@@ -194,8 +176,8 @@ class RateLimiterFlexibleRateLimiter extends DataFlow::FunctionNode {
       rateLimiterClassName.matches("RateLimiter%") and
       rateLimiterClass = API::moduleImport("rate-limiter-flexible").getMember(rateLimiterClassName) and
       rateLimiterConsume = rateLimiterClass.getInstance().getMember("consume") and
-      request.getParameter() = getRouteHandlerParameter(this.getFunction(), "request") and
-      request.getAPropertyRead().flowsTo(rateLimiterConsume.getAParameter().getARhs())
+      request = getRouteHandlerParameter(this, "request") and
+      request.getAPropertyRead().flowsTo(rateLimiterConsume.getAParameter().asSink())
     )
   }
 }
@@ -203,6 +185,9 @@ class RateLimiterFlexibleRateLimiter extends DataFlow::FunctionNode {
 /**
  * A route-handler expression that is rate-limited by the `rate-limiter-flexible` package.
  */
-class RouteHandlerLimitedByRateLimiterFlexible extends RateLimitingMiddleware {
-  RouteHandlerLimitedByRateLimiterFlexible() { this instanceof RateLimiterFlexibleRateLimiter }
+class RouteHandlerLimitedByRateLimiterFlexible extends RateLimitingMiddleware instanceof RateLimiterFlexibleRateLimiter
+{ }
+
+private class FastifyRateLimiter extends RateLimitingMiddleware {
+  FastifyRateLimiter() { this = DataFlow::moduleImport("fastify-rate-limit") }
 }

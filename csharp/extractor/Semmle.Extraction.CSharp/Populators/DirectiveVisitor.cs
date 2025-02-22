@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -9,7 +8,7 @@ namespace Semmle.Extraction.CSharp.Populators
     internal class DirectiveVisitor : CSharpSyntaxWalker
     {
         private readonly Context cx;
-        private readonly List<IEntity> branchesTaken = new();
+        private readonly List<IEntity> branchesTaken = [];
 
         /// <summary>
         /// Gets a list of `#if`, `#elif`, and `#else` entities where the branch
@@ -17,50 +16,35 @@ namespace Semmle.Extraction.CSharp.Populators
         /// </summary>
         public IEnumerable<IEntity> BranchesTaken => branchesTaken;
 
-        public DirectiveVisitor(Context cx) : base(SyntaxWalkerDepth.StructuredTrivia)
-        {
+        public DirectiveVisitor(Context cx) : base(SyntaxWalkerDepth.StructuredTrivia) =>
             this.cx = cx;
-        }
 
-        public override void VisitPragmaWarningDirectiveTrivia(PragmaWarningDirectiveTriviaSyntax node)
-        {
+        public override void VisitPragmaWarningDirectiveTrivia(PragmaWarningDirectiveTriviaSyntax node) =>
             Entities.PragmaWarningDirective.Create(cx, node);
-        }
 
-        public override void VisitPragmaChecksumDirectiveTrivia(PragmaChecksumDirectiveTriviaSyntax node)
-        {
+        public override void VisitPragmaChecksumDirectiveTrivia(PragmaChecksumDirectiveTriviaSyntax node) =>
             Entities.PragmaChecksumDirective.Create(cx, node);
-        }
 
-        public override void VisitDefineDirectiveTrivia(DefineDirectiveTriviaSyntax node)
-        {
+        public override void VisitDefineDirectiveTrivia(DefineDirectiveTriviaSyntax node) =>
             Entities.DefineDirective.Create(cx, node);
-        }
 
-        public override void VisitUndefDirectiveTrivia(UndefDirectiveTriviaSyntax node)
-        {
+        public override void VisitUndefDirectiveTrivia(UndefDirectiveTriviaSyntax node) =>
             Entities.UndefineDirective.Create(cx, node);
-        }
 
-        public override void VisitWarningDirectiveTrivia(WarningDirectiveTriviaSyntax node)
-        {
+        public override void VisitWarningDirectiveTrivia(WarningDirectiveTriviaSyntax node) =>
             Entities.WarningDirective.Create(cx, node);
-        }
 
-        public override void VisitErrorDirectiveTrivia(ErrorDirectiveTriviaSyntax node)
-        {
+        public override void VisitErrorDirectiveTrivia(ErrorDirectiveTriviaSyntax node) =>
             Entities.ErrorDirective.Create(cx, node);
-        }
 
-        public override void VisitNullableDirectiveTrivia(NullableDirectiveTriviaSyntax node)
-        {
+        public override void VisitNullableDirectiveTrivia(NullableDirectiveTriviaSyntax node) =>
             Entities.NullableDirective.Create(cx, node);
-        }
 
-        public override void VisitLineDirectiveTrivia(LineDirectiveTriviaSyntax node)
-        {
+        public override void VisitLineDirectiveTrivia(LineDirectiveTriviaSyntax node) =>
             Entities.LineDirective.Create(cx, node);
-        }
+
+        public override void VisitLineSpanDirectiveTrivia(LineSpanDirectiveTriviaSyntax node) =>
+            Entities.LineSpanDirective.Create(cx, node);
 
         private readonly Stack<Entities.RegionDirective> regionStarts = new Stack<Entities.RegionDirective>();
 
@@ -75,7 +59,7 @@ namespace Semmle.Extraction.CSharp.Populators
             if (regionStarts.Count == 0)
             {
                 cx.ExtractionError("Couldn't find start region", null,
-                    cx.CreateLocation(node.GetLocation()), null, Util.Logging.Severity.Warning);
+                    cx.CreateLocation(node.GetLocation()), null, Semmle.Util.Logging.Severity.Warning);
                 return;
             }
 
@@ -110,7 +94,7 @@ namespace Semmle.Extraction.CSharp.Populators
             if (ifStarts.Count == 0)
             {
                 cx.ExtractionError("Couldn't find start if", null,
-                    cx.CreateLocation(node.GetLocation()), null, Util.Logging.Severity.Warning);
+                    cx.CreateLocation(node.GetLocation()), null, Semmle.Util.Logging.Severity.Warning);
                 return;
             }
 
@@ -123,7 +107,7 @@ namespace Semmle.Extraction.CSharp.Populators
             if (ifStarts.Count == 0)
             {
                 cx.ExtractionError("Couldn't find start if", null,
-                    cx.CreateLocation(node.GetLocation()), null, Util.Logging.Severity.Warning);
+                    cx.CreateLocation(node.GetLocation()), null, Semmle.Util.Logging.Severity.Warning);
                 return;
             }
 
@@ -138,7 +122,7 @@ namespace Semmle.Extraction.CSharp.Populators
             if (ifStarts.Count == 0)
             {
                 cx.ExtractionError("Couldn't find start if", null,
-                    cx.CreateLocation(node.GetLocation()), null, Util.Logging.Severity.Warning);
+                    cx.CreateLocation(node.GetLocation()), null, Semmle.Util.Logging.Severity.Warning);
                 return;
             }
 

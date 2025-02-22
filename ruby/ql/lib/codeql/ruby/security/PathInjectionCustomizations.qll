@@ -4,13 +4,14 @@
  * adding your own.
  */
 
-private import ruby
+private import codeql.ruby.AST
 private import codeql.ruby.ApiGraphs
 private import codeql.ruby.CFG
 private import codeql.ruby.Concepts
 private import codeql.ruby.DataFlow
 private import codeql.ruby.dataflow.BarrierGuards
 private import codeql.ruby.dataflow.RemoteFlowSources
+private import codeql.ruby.frameworks.data.internal.ApiGraphModels
 
 module PathInjection {
   /**
@@ -24,9 +25,9 @@ module PathInjection {
   abstract class Sink extends DataFlow::Node { }
 
   /**
-   * A sanitizer guard for path injection vulnerabilities.
+   * A sanitizer for path injection vulnerabilities.
    */
-  abstract class SanitizerGuard extends DataFlow::BarrierGuard { }
+  abstract class Sanitizer extends DataFlow::Node { }
 
   /**
    * A source of remote user input, considered as a flow source.
@@ -43,12 +44,17 @@ module PathInjection {
   /**
    * A comparison with a constant string, considered as a sanitizer-guard.
    */
-  class StringConstCompareAsSanitizerGuard extends SanitizerGuard, StringConstCompare { }
+  class StringConstCompareAsSanitizer extends Sanitizer, StringConstCompareBarrier { }
 
   /**
    * An inclusion check against an array of constant strings, considered as a
    * sanitizer-guard.
    */
-  class StringConstArrayInclusionCallAsSanitizerGuard extends SanitizerGuard,
-    StringConstArrayInclusionCall { }
+  class StringConstArrayInclusionCallAsSanitizer extends Sanitizer,
+    StringConstArrayInclusionCallBarrier
+  { }
+
+  private class ExternalPathInjectionSink extends Sink {
+    ExternalPathInjectionSink() { this = ModelOutput::getASinkNode("path-injection").asSink() }
+  }
 }

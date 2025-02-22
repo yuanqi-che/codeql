@@ -16,47 +16,57 @@
 import csharp
 import semmle.code.csharp.frameworks.System
 import semmle.code.csharp.security.dataflow.flowsinks.Remote
-import semmle.code.csharp.dataflow.DataFlow::DataFlow::PathGraph
+import ExceptionInformationExposure::PathGraph
 
 /**
  * A taint-tracking configuration for reasoning about stack traces that flow to web page outputs.
  */
-class TaintTrackingConfiguration extends TaintTracking::Configuration {
-  TaintTrackingConfiguration() { this = "StackTrace" }
-
-  override predicate isSource(DataFlow::Node source) {
-    exists(Expr exceptionExpr |
+module ExceptionInformationExposureConfig implements DataFlow::ConfigSig {
+  predicate isSource(DataFlow::Node source) {
+    exists(Expr expr |
       // Writing an exception directly is bad
-      source.asExpr() = exceptionExpr
+      source.asExpr() = expr
       or
-      // Writing an exception property is bad
-      source.asExpr().(PropertyAccess).getQualifier() = exceptionExpr
-      or
-      // Writing the result of ToString is bad
-      source.asExpr() =
-        any(MethodCall mc | mc.getQualifier() = exceptionExpr and mc.getTarget().hasName("ToString"))
+      // Writing a property of an exception is bad
+      source.asExpr().(PropertyAccess).getQualifier() = expr
     |
       // Expr has type `System.Exception`.
-      exceptionExpr.getType().(RefType).getABaseType*() instanceof SystemExceptionClass and
+      expr.getType().(RefType).getABaseType*() instanceof SystemExceptionClass and
       // And is not within an exception callable.
-      not exists(Callable enclosingCallable |
-        enclosingCallable = exceptionExpr.getEnclosingCallable()
-      |
+      not exists(Callable enclosingCallable | enclosingCallable = expr.getEnclosingCallable() |
         enclosingCallable.getDeclaringType().getABaseType*() instanceof SystemExceptionClass
       )
     )
   }
 
-  override predicate isSink(DataFlow::Node sink) { sink instanceof RemoteFlowSink }
+  predicate isAdditionalFlowStep(DataFlow::Node source, DataFlow::Node sink) {
+    sink.asExpr() =
+      any(MethodCall mc |
+        source.asExpr() = mc.getQualifier() and
+        mc.getTarget().hasName("ToString") and
+        mc.getQualifier().getType().(RefType).getABaseType*() instanceof SystemExceptionClass
+      )
+  }
 
-  override predicate isSanitizer(DataFlow::Node sanitizer) {
+  predicate isSink(DataFlow::Node sink) { sink instanceof RemoteFlowSink }
+
+  predicate isBarrier(DataFlow::Node sanitizer) {
     // Do not flow through Message
     sanitizer.asExpr() = any(SystemExceptionClass se).getProperty("Message").getAnAccess()
   }
+
+  predicate isBarrierIn(DataFlow::Node sanitizer) {
+    // Do not flow through Message
+    sanitizer.asExpr().getType().(RefType).getABaseType*() instanceof SystemExceptionClass
+  }
 }
 
-from TaintTrackingConfiguration c, DataFlow::PathNode source, DataFlow::PathNode sink
-where c.hasFlowPath(source, sink)
-select sink.getNode(), source, sink,
-  "Exception information from $@ flows to here, and is exposed to the user.", source.getNode(),
-  source.toString()
+/**
+ * A taint-tracking module for reasoning about stack traces that flow to web page outputs.
+ */
+module ExceptionInformationExposure = TaintTracking::Global<ExceptionInformationExposureConfig>;
+
+from ExceptionInformationExposure::PathNode source, ExceptionInformationExposure::PathNode sink
+where ExceptionInformationExposure::flowPath(source, sink)
+select sink.getNode(), source, sink, "This information exposed to the user depends on $@.",
+  source.getNode(), "exception information"

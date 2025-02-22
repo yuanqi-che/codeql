@@ -15,7 +15,7 @@ private import HeuristicNames
 
 /** An expression that might contain sensitive data. */
 cached
-abstract class SensitiveExpr extends Expr {
+abstract class SensitiveNode extends DataFlow::Node {
   /** Gets a human-readable description of this expression for use in alert messages. */
   cached
   abstract string describe();
@@ -25,52 +25,34 @@ abstract class SensitiveExpr extends Expr {
   abstract SensitiveDataClassification getClassification();
 }
 
-/** DEPRECATED: Use `SensitiveDataClassification` and helpers instead. */
-deprecated module SensitiveExpr {
-  /** DEPRECATED: Use `SensitiveDataClassification` instead. */
-  deprecated class Classification = SensitiveDataClassification;
-
-  /** DEPRECATED: Use `SensitiveDataClassification::secret` instead. */
-  deprecated predicate secret = SensitiveDataClassification::secret/0;
-
-  /** DEPRECATED: Use `SensitiveDataClassification::id` instead. */
-  deprecated predicate id = SensitiveDataClassification::id/0;
-
-  /** DEPRECATED: Use `SensitiveDataClassification::password` instead. */
-  deprecated predicate password = SensitiveDataClassification::password/0;
-
-  /** DEPRECATED: Use `SensitiveDataClassification::certificate` instead. */
-  deprecated predicate certificate = SensitiveDataClassification::certificate/0;
-}
-
 /** A function call that might produce sensitive data. */
-class SensitiveCall extends SensitiveExpr, InvokeExpr {
+class SensitiveCall extends SensitiveNode instanceof DataFlow::InvokeNode {
   SensitiveDataClassification classification;
 
   SensitiveCall() {
-    classification = this.getCalleeName().(SensitiveDataFunctionName).getClassification()
+    classification = super.getCalleeName().(SensitiveDataFunctionName).getClassification()
     or
     // This is particularly to pick up methods with an argument like "password", which
     // may indicate a lookup.
-    exists(string s | this.getAnArgument().mayHaveStringValue(s) |
+    exists(string s | super.getAnArgument().mayHaveStringValue(s) |
       nameIndicatesSensitiveData(s, classification)
     )
   }
 
-  override string describe() { result = "a call to " + this.getCalleeName() }
+  override string describe() { result = "a call to " + super.getCalleeName() }
 
   override SensitiveDataClassification getClassification() { result = classification }
 }
 
 /** An access to a variable or property that might contain sensitive data. */
-abstract class SensitiveVariableAccess extends SensitiveExpr {
+abstract class SensitiveVariableAccess extends SensitiveNode {
   string name;
 
   SensitiveVariableAccess() {
-    this.(VarAccess).getName() = name
+    this.asExpr().(VarAccess).getName() = name
     or
     exists(DataFlow::PropRead pr |
-      this = pr.asExpr() and
+      this = pr and
       pr.getPropertyName() = name
     )
   }
@@ -98,45 +80,43 @@ private predicate writesProperty(DataFlow::Node node, string name) {
   exists(VarDef v | v.getAVariable().getName() = name |
     if exists(v.getSource())
     then v.getSource() = node.asExpr()
-    else node = DataFlow::ssaDefinitionNode(SSA::definition(v))
+    else node = DataFlow::ssaDefinitionNode(Ssa::definition(v))
   )
 }
 
 /** A write to a variable or property that might contain sensitive data. */
 private class BasicSensitiveWrite extends SensitiveWrite {
-  SensitiveDataClassification classification;
+  string name;
 
   BasicSensitiveWrite() {
-    exists(string name |
-      /*
-       * PERFORMANCE OPTIMISATION:
-       * `nameIndicatesSensitiveData` performs a `regexpMatch` on `name`.
-       * To carry out a regex match, we must first compute the Cartesian product
-       * of all possible `name`s and regexes, then match.
-       * To keep this product as small as possible,
-       * we want to filter `name` as much as possible before the product.
-       *
-       * Do this by factoring out a helper predicate containing the filtering
-       * logic that restricts `name`. This helper predicate will get picked first
-       * in the join order, since it is the only call here that binds `name`.
-       */
+    /*
+     * PERFORMANCE OPTIMISATION:
+     * `nameIndicatesSensitiveData` performs a `regexpMatch` on `name`.
+     * To carry out a regex match, we must first compute the Cartesian product
+     * of all possible `name`s and regexes, then match.
+     * To keep this product as small as possible,
+     * we want to filter `name` as much as possible before the product.
+     *
+     * Do this by factoring out a helper predicate containing the filtering
+     * logic that restricts `name`. This helper predicate will get picked first
+     * in the join order, since it is the only call here that binds `name`.
+     */
 
-      writesProperty(this, name) and
-      nameIndicatesSensitiveData(name, classification)
-    )
+    writesProperty(this, name) and
+    nameIndicatesSensitiveData(name)
   }
 
   /** Gets a classification of the kind of sensitive data the write might handle. */
-  SensitiveDataClassification getClassification() { result = classification }
+  SensitiveDataClassification getClassification() { nameIndicatesSensitiveData(name, result) }
 }
 
 /** An access to a variable or property that might contain sensitive data. */
 private class BasicSensitiveVariableAccess extends SensitiveVariableAccess {
-  SensitiveDataClassification classification;
+  BasicSensitiveVariableAccess() { nameIndicatesSensitiveData(name) }
 
-  BasicSensitiveVariableAccess() { nameIndicatesSensitiveData(name, classification) }
-
-  override SensitiveDataClassification getClassification() { result = classification }
+  override SensitiveDataClassification getClassification() {
+    nameIndicatesSensitiveData(name, result)
+  }
 }
 
 /** A function name that suggests it may be sensitive. */
@@ -156,11 +136,11 @@ abstract class SensitiveDataFunctionName extends SensitiveFunctionName {
 
 /** A method that might return sensitive data, based on the name. */
 class CredentialsFunctionName extends SensitiveDataFunctionName {
-  SensitiveDataClassification classification;
+  CredentialsFunctionName() { nameIndicatesSensitiveData(this) }
 
-  CredentialsFunctionName() { nameIndicatesSensitiveData(this, classification) }
-
-  override SensitiveDataClassification getClassification() { result = classification }
+  override SensitiveDataClassification getClassification() {
+    nameIndicatesSensitiveData(this, result)
+  }
 }
 
 /**
@@ -173,8 +153,8 @@ class AuthorizationCall extends SensitiveAction, DataFlow::CallNode {
   AuthorizationCall() {
     exists(string s | s = this.getCalleeName() |
       // name contains `login` or `auth`, but not as part of `loginfo` or `unauth`;
-      // also exclude `author`
-      s.regexpMatch("(?i).*(login(?!fo)|(?<!un)auth(?!or\\b)|verify).*") and
+      // also exclude `author` and words followed by `err` (as in `error`)
+      s.regexpMatch("(?i).*(login(?!fo)|(?<!un)auth(?!or\\b)|verify)(?!err).*") and
       // but it does not start with `get` or `set`
       not s.regexpMatch("(?i)(get|set).*")
     )
@@ -191,10 +171,8 @@ class ProtectCall extends DataFlow::CallNode {
 }
 
 /** An expression that might contain a clear-text password. */
-class CleartextPasswordExpr extends SensitiveExpr {
-  CleartextPasswordExpr() {
-    this.(SensitiveExpr).getClassification() = SensitiveDataClassification::password()
-  }
+class CleartextPasswordExpr extends SensitiveNode {
+  CleartextPasswordExpr() { this.getClassification() = SensitiveDataClassification::password() }
 
   override string describe() { none() }
 
@@ -214,8 +192,12 @@ module PasswordHeuristics {
     or
     exists(string normalized | normalized = password.toLowerCase() |
       count(normalized.charAt(_)) = 1 or
-      normalized.regexpMatch(".*(pass|test|sample|example|secret|root|admin|user|change|auth).*")
+      normalized
+          .regexpMatch(".*(pass|test|sample|example|secret|root|admin|user|change|auth|fake|(my(token|password))|string|foo|bar|baz|qux|1234|3141|abcd).*")
     )
+    or
+    // repeats the same char more than 10 times
+    password.regexpMatch(".*([a-zA-Z0-9])\\1{10,}.*")
   }
 
   /**
@@ -225,19 +207,19 @@ module PasswordHeuristics {
   predicate isDummyAuthHeader(string header) {
     isDummyPassword(header)
     or
-    exists(string prefix, string suffix | prefix = getAnHTTPAuthenticationScheme() |
+    exists(string prefix, string suffix | prefix = getAnHttpAuthenticationScheme() |
       header.toLowerCase() = prefix + " " + suffix and
       isDummyPassword(suffix)
     )
     or
-    header.trim().toLowerCase() = getAnHTTPAuthenticationScheme()
+    header.trim().toLowerCase() = getAnHttpAuthenticationScheme()
   }
 
   /**
    * Gets a HTTP authentication scheme normalized to lowercase.
    * From this list: https://www.iana.org/assignments/http-authschemes/http-authschemes.xhtml
    */
-  private string getAnHTTPAuthenticationScheme() {
+  private string getAnHttpAuthenticationScheme() {
     result =
       [
         "Basic", "Bearer", "Digest", "HOBA", "Mutual", "Negotiate", "OAuth", "SCRAM-SHA-1",

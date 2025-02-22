@@ -13,29 +13,29 @@ abstract class EmscriptenMarkerComment extends GeneratedCodeMarkerComment { }
 /**
  * An `EMSCRIPTEN_START_ASM` marker comment.
  */
-class EmscriptenStartASMComment extends EmscriptenMarkerComment {
-  EmscriptenStartASMComment() { getText().trim() = "EMSCRIPTEN_START_ASM" }
+class EmscriptenStartAsmComment extends EmscriptenMarkerComment {
+  EmscriptenStartAsmComment() { this.getText().trim() = "EMSCRIPTEN_START_ASM" }
 }
 
 /**
  * An `EMSCRIPTEN_START_FUNCS` marker comment.
  */
 class EmscriptenStartFuncsComment extends EmscriptenMarkerComment {
-  EmscriptenStartFuncsComment() { getText().trim() = "EMSCRIPTEN_START_FUNCS" }
+  EmscriptenStartFuncsComment() { this.getText().trim() = "EMSCRIPTEN_START_FUNCS" }
 }
 
 /**
  * An `EMSCRIPTEN_END_ASM` marker comment.
  */
-class EmscriptenEndASMComment extends EmscriptenMarkerComment {
-  EmscriptenEndASMComment() { getText().trim() = "EMSCRIPTEN_END_ASM" }
+class EmscriptenEndAsmComment extends EmscriptenMarkerComment {
+  EmscriptenEndAsmComment() { this.getText().trim() = "EMSCRIPTEN_END_ASM" }
 }
 
 /**
  * An `EMSCRIPTEN_END_FUNCS` marker comment.
  */
 class EmscriptenEndFuncsComment extends EmscriptenMarkerComment {
-  EmscriptenEndFuncsComment() { getText().trim() = "EMSCRIPTEN_END_FUNCS" }
+  EmscriptenEndFuncsComment() { this.getText().trim() = "EMSCRIPTEN_END_FUNCS" }
 }
 
 /**

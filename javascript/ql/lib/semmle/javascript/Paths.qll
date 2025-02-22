@@ -4,6 +4,7 @@
  */
 
 import javascript
+private import semmle.javascript.dataflow.internal.DataFlowNode
 
 /**
  * Internal representation of paths as lists of components.
@@ -180,7 +181,7 @@ private Path resolveUpTo(PathString p, int n, Folder root, boolean inTS) {
 }
 
 /**
- * Gets the `i`th component of the path `str`, where `base` is the resolved path one level up.
+ * Gets the `n`th component of the path `str`, where `base` is the resolved path one level up.
  * Supports that the root directory might be compiled output from TypeScript.
  * `inTS` is true if the result is TypeScript that is compiled into the path specified by `str`.
  */
@@ -212,7 +213,7 @@ private module TypeScriptOutDir {
    * Gets a folder of TypeScript files that is compiled to JavaScript files in `outdir` relative to a `parent`.
    */
   string getOriginalTypeScriptFolder(string outdir, Folder parent) {
-    exists(JSONObject tsconfig |
+    exists(JsonObject tsconfig |
       outdir = removeLeadingSlash(getOutDir(tsconfig, parent)) and
       result = removeLeadingSlash(getEffectiveRootDirFromTSConfig(tsconfig))
     )
@@ -227,9 +228,9 @@ private module TypeScriptOutDir {
   }
 
   /**
-   * Gets the `outDir` option from a tsconfig file from the folder `parent`.
+   * Gets the "outDir" option from a `tsconfig` file from the folder `parent`.
    */
-  private string getOutDir(JSONObject tsconfig, Folder parent) {
+  private string getOutDir(JsonObject tsconfig, Folder parent) {
     tsconfig.getFile().getBaseName().regexpMatch("tsconfig.*\\.json") and
     tsconfig.isTopLevel() and
     tsconfig.getFile().getParentContainer() = parent and
@@ -241,7 +242,7 @@ private module TypeScriptOutDir {
    * Based on the tsconfig.json file `tsconfig`.
    */
   pragma[inline]
-  private string getEffectiveRootDirFromTSConfig(JSONObject tsconfig) {
+  private string getEffectiveRootDirFromTSConfig(JsonObject tsconfig) {
     // if an explicit "rootDir" option exists, then use that.
     result = getRootDir(tsconfig)
     or
@@ -273,7 +274,7 @@ private module TypeScriptOutDir {
    * Can have multiple results if the includes are from multiple folders.
    */
   pragma[inline]
-  private string getARootDirFromInclude(JSONObject tsconfig) {
+  private string getARootDirFromInclude(JsonObject tsconfig) {
     result =
       getRootFolderFromPath(tsconfig.getPropValue("include").getElementValue(_).getStringValue())
   }
@@ -282,7 +283,7 @@ private module TypeScriptOutDir {
    * Gets the value of the "rootDir" option from a tsconfig.json.
    */
   pragma[inline]
-  private string getRootDir(JSONObject tsconfig) {
+  private string getRootDir(JsonObject tsconfig) {
     result = tsconfig.getPropValue("compilerOptions").getPropValue("rootDir").getStringValue()
   }
 }
@@ -380,6 +381,25 @@ private class PathExprString extends PathString {
   }
 }
 
+pragma[nomagic]
+private EarlyStageNode getAPathExprAlias(PathExpr expr) {
+  DataFlow::Impl::earlyStageImmediateFlowStep(TValueNode(expr), result)
+  or
+  DataFlow::Impl::earlyStageImmediateFlowStep(getAPathExprAlias(expr), result)
+}
+
+private class PathExprFromAlias extends PathExpr {
+  private PathExpr other;
+
+  PathExprFromAlias() { TValueNode(this) = getAPathExprAlias(other) }
+
+  override string getValue() { result = other.getValue() }
+
+  override Folder getAdditionalSearchRoot(int priority) {
+    result = other.getAdditionalSearchRoot(priority)
+  }
+}
+
 /**
  * A path expression of the form `p + q`, where both `p` and `q`
  * are path expressions.
@@ -413,13 +433,18 @@ private class ConcatPath extends PathExpr {
  * Examples include arguments to the CommonJS `require` function or AMD dependency arguments.
  */
 abstract class PathExprCandidate extends Expr {
+  pragma[nomagic]
+  private Expr getAPart1() { result = this or result = this.getAPart().getAChildExpr() }
+
+  private EarlyStageNode getAnAliasedPart1() {
+    result = TValueNode(this.getAPart1())
+    or
+    DataFlow::Impl::earlyStageImmediateFlowStep(result, this.getAnAliasedPart1())
+  }
+
   /**
-   * Gets an expression that is nested inside this expression.
-   *
-   * Equivalent to `getAChildExpr*()`, but useful to enforce a better join order (in spite of
-   * what the optimizer thinks, there are generally far fewer `PathExprCandidate`s than
-   * `ConstantString`s).
+   * Gets an expression that is depended on by an expression nested inside this expression.
    */
   pragma[nomagic]
-  Expr getAPart() { result = this or result = this.getAPart().getAChildExpr() }
+  Expr getAPart() { TValueNode(result) = this.getAnAliasedPart1() }
 }

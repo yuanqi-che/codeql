@@ -13,10 +13,10 @@
  */
 
 import python
-import semmle.python.security.dataflow.UrlRedirect
-import DataFlow::PathGraph
+import semmle.python.security.dataflow.UrlRedirectQuery
+import UrlRedirectFlow::PathGraph
 
-from UrlRedirect::Configuration config, DataFlow::PathNode source, DataFlow::PathNode sink
-where config.hasFlowPath(source, sink)
-select sink.getNode(), source, sink, "Untrusted URL redirection due to $@.", source.getNode(),
-  "A user-provided value"
+from UrlRedirectFlow::PathNode source, UrlRedirectFlow::PathNode sink
+where UrlRedirectFlow::flowPath(source, sink)
+select sink.getNode(), source, sink, "Untrusted URL redirection depends on a $@.", source.getNode(),
+  "user-provided value"

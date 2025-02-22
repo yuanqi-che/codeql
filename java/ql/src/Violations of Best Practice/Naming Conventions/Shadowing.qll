@@ -1,9 +1,5 @@
 import java
 
-predicate initializedToField(LocalVariableDecl d, Field f) {
-  exists(LocalVariableDeclExpr e | e.getVariable() = d and f.getAnAccess() = e.getInit())
-}
-
 predicate getterFor(Method m, Field f) {
   m.getName().matches("get%") and
   m.getDeclaringType() = f.getDeclaringType() and
@@ -20,16 +16,24 @@ predicate setterFor(Method m, Field f) {
 predicate shadows(LocalVariableDecl d, Class c, Field f, Callable method) {
   d.getCallable() = method and
   method.getDeclaringType() = c and
-  c.getAField() = f and
-  f.getName() = d.getName() and
-  f.getType() = d.getType() and
-  not d.getCallable().isStatic() and
+  f = getField(c, d.getName(), d.getType()) and
+  not method.isStatic() and
   not f.isStatic()
+}
+
+/**
+ * Gets the field with the given name and type from the given class, if any.
+ */
+pragma[nomagic]
+private Field getField(Class c, string name, Type t) {
+  result.getDeclaringType() = c and
+  result.getName() = name and
+  result.getType() = t
 }
 
 predicate thisAccess(LocalVariableDecl d, Field f) {
   shadows(d, _, f, _) and
-  exists(VarAccess va | va.getVariable().(Field).getSourceDeclaration() = f |
+  exists(VarAccess va | va.getVariable() = f |
     va.getQualifier() instanceof ThisAccess and
     va.getEnclosingCallable() = d.getCallable()
   )
@@ -37,7 +41,7 @@ predicate thisAccess(LocalVariableDecl d, Field f) {
 
 predicate confusingAccess(LocalVariableDecl d, Field f) {
   shadows(d, _, f, _) and
-  exists(VarAccess va | va.getVariable().(Field).getSourceDeclaration() = f |
+  exists(VarAccess va | va.getVariable() = f |
     not exists(va.getQualifier()) and
     va.getEnclosingCallable() = d.getCallable()
   )
@@ -48,12 +52,9 @@ predicate assignmentToShadowingLocal(LocalVariableDecl d, Field f) {
   exists(Expr assignedValue, Expr use |
     d.getAnAssignedValue() = assignedValue and getARelevantChild(assignedValue) = use
   |
-    exists(FieldAccess access, Field ff | access = assignedValue |
-      ff = access.getField() and
-      ff.getSourceDeclaration() = f
-    )
+    exists(FieldAccess access | access = assignedValue | f = access.getField())
     or
-    exists(MethodAccess get, Method getter | get = assignedValue and getter = get.getMethod() |
+    exists(MethodCall get, Method getter | get = assignedValue and getter = get.getMethod() |
       getterFor(getter, f)
     )
   )
@@ -62,23 +63,22 @@ predicate assignmentToShadowingLocal(LocalVariableDecl d, Field f) {
 predicate assignmentFromShadowingLocal(LocalVariableDecl d, Field f) {
   shadows(d, _, _, _) and
   exists(VarAccess access | access = d.getAnAccess() |
-    exists(MethodAccess set, Expr arg, Method setter |
+    exists(MethodCall set, Expr arg, Method setter |
       access = getARelevantChild(arg) and
       arg = set.getAnArgument() and
       setter = set.getMethod() and
       setterFor(setter, f)
     )
     or
-    exists(Field instance, Expr assignedValue |
+    exists(Expr assignedValue |
       access = getARelevantChild(assignedValue) and
-      assignedValue = instance.getAnAssignedValue() and
-      instance.getSourceDeclaration() = f
+      assignedValue = f.getAnAssignedValue()
     )
   )
 }
 
 private Expr getARelevantChild(Expr parent) {
-  exists(MethodAccess ma | parent = ma.getAnArgument() and result = parent)
+  exists(MethodCall ma | parent = ma.getAnArgument() and result = parent)
   or
   exists(Variable v | parent = v.getAnAccess() and result = parent)
   or

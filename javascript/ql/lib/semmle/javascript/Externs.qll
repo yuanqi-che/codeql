@@ -53,7 +53,7 @@ import javascript
  *
  * /**
  *  * @param {!Object} obj
- *  * @return {!Array<string>}
+ *  * @return {!Array&lt;string&gt;}
  *  *&#47;
  * Object.keys = function(obj) {};
  *
@@ -64,7 +64,7 @@ import javascript
  * Object.prototype.hasOwnProperty = function(p) {};
  * </pre>
  */
-abstract class ExternalDecl extends ASTNode {
+abstract class ExternalDecl extends AstNode {
   /** Gets the name of this declaration. */
   abstract string getName();
 
@@ -109,7 +109,7 @@ class ExternalTypedef extends ExternalDecl, VariableDeclarator {
  *
  * /**
  *  * @param {!Object} obj
- *  * @return {!Array<string>}
+ *  * @return {!Array&lt;string&gt;}
  *  *&#47;
  * Object.keys = function(obj) {};
  *
@@ -125,7 +125,7 @@ abstract class ExternalVarDecl extends ExternalDecl {
    *
    * The result can be either a function or an expression.
    */
-  abstract ASTNode getInit();
+  abstract AstNode getInit();
 
   /**
    * Gets a JSDoc tag associated with this declaration.
@@ -179,7 +179,7 @@ class ExternalGlobalFunctionDecl extends ExternalGlobalDecl, FunctionDeclStmt {
   /** Gets the name of this declaration. */
   override string getName() { result = FunctionDeclStmt.super.getName() }
 
-  override ASTNode getInit() { result = this }
+  override AstNode getInit() { result = this }
 }
 
 /**
@@ -214,7 +214,7 @@ class ExternalGlobalVarDecl extends ExternalGlobalDecl, VariableDeclarator {
  * <pre>
  * /**
  *  * @param {!Object} obj
- *  * @return {!Array<string>}
+ *  * @return {!Array&lt;string&gt;}
  *  *&#47;
  * Object.keys = function(obj) {};
  *
@@ -273,7 +273,7 @@ class ExternalMemberDecl extends ExternalVarDecl, ExprStmt {
  * <pre>
  * /**
  *  * @param {!Object} obj
- *  * @return {!Array<string>}
+ *  * @return {!Array&lt;string&gt;}
  *  *&#47;
  * Object.keys = function(obj) {};
  *
@@ -336,7 +336,7 @@ class ExternalInstanceMemberDecl extends ExternalMemberDecl {
  *   function(p) {};  // external function entity
  * </pre>
  */
-class ExternalEntity extends ASTNode {
+class ExternalEntity extends AstNode {
   ExternalEntity() { exists(ExternalVarDecl d | d.getInit() = this) }
 
   /** Gets the variable declaration to which this entity belongs. */
@@ -544,7 +544,7 @@ class ExternalInterface extends ExternalType {
 }
 
 /**
- * Externs definition for the Function object.
+ * The externs definition for the Function object.
  *
  * Example:
  *
@@ -561,7 +561,7 @@ class FunctionExternal extends ExternalConstructor {
 }
 
 /**
- * Externs definition for the Object object.
+ * The externs definition for the Object object.
  *
  * Example:
  *
@@ -578,7 +578,7 @@ class ObjectExternal extends ExternalConstructor {
 }
 
 /**
- * Externs definition for the Array object.
+ * The externs definition for the Array object.
  *
  * Example:
  *

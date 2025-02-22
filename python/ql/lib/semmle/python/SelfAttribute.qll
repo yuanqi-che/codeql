@@ -31,7 +31,7 @@ private predicate self_attribute(Attribute attr, Class cls) {
   )
 }
 
-/** Helper class for UndefinedClassAttribute.ql &amp; MaybeUndefinedClassAttribute.ql */
+/** A helper class for UndefinedClassAttribute.ql &amp; MaybeUndefinedClassAttribute.ql */
 class SelfAttributeRead extends SelfAttribute {
   SelfAttributeRead() {
     this.getCtx() instanceof Load and
@@ -78,8 +78,8 @@ private predicate attr_assigned_in_method_arg_n(FunctionObject method, string na
       attr.isStore()
     )
     or
-    exists(CallNode call, FunctionObject callee, int m |
-      callee.getArgumentForCall(call, m) = param.getAUse() and
+    exists(FunctionObject callee, int m |
+      callee.getArgumentForCall(_, m) = param.getAUse() and
       attr_assigned_in_method_arg_n(callee, name, m)
     )
   )

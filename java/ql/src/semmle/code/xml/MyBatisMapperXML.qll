@@ -1,15 +1,16 @@
 /**
  * Provides classes for working with MyBatis mapper xml files and their content.
  */
+deprecated module;
 
 import java
 
 /**
  * MyBatis Mapper XML file.
  */
-class MyBatisMapperXMLFile extends XMLFile {
-  MyBatisMapperXMLFile() {
-    count(XMLElement e | e = this.getAChild()) = 1 and
+class MyBatisMapperXmlFile extends XmlFile {
+  MyBatisMapperXmlFile() {
+    count(XmlElement e | e = this.getAChild()) = 1 and
     this.getAChild().getName() = "mapper"
   }
 }
@@ -17,8 +18,8 @@ class MyBatisMapperXMLFile extends XMLFile {
 /**
  * An XML element in a `MyBatisMapperXMLFile`.
  */
-class MyBatisMapperXMLElement extends XMLElement {
-  MyBatisMapperXMLElement() { this.getFile() instanceof MyBatisMapperXMLFile }
+class MyBatisMapperXmlElement extends XmlElement {
+  MyBatisMapperXmlElement() { this.getFile() instanceof MyBatisMapperXmlFile }
 
   /**
    * Gets the value for this element, with leading and trailing whitespace trimmed.
@@ -36,7 +37,7 @@ class MyBatisMapperXMLElement extends XMLElement {
 /**
  * An MyBatis Mapper sql operation element.
  */
-abstract class MyBatisMapperSqlOperation extends MyBatisMapperXMLElement {
+abstract class MyBatisMapperSqlOperation extends MyBatisMapperXmlElement {
   /**
    * Gets the value of the `id` attribute of MyBatis Mapper sql operation element.
    */
@@ -52,7 +53,7 @@ abstract class MyBatisMapperSqlOperation extends MyBatisMapperXMLElement {
    */
   Method getMapperMethod() {
     result.getName() = this.getId() and
-    result.getDeclaringType() = this.getParent().(MyBatisMapperXMLElement).getNamespaceRefType()
+    result.getDeclaringType() = this.getParent().(MyBatisMapperXmlElement).getNamespaceRefType()
   }
 }
 
@@ -87,7 +88,7 @@ class MyBatisMapperSelect extends MyBatisMapperSqlOperation {
 /**
  * A `<sql>` element in a `MyBatisMapperXMLElement`.
  */
-class MyBatisMapperSql extends MyBatisMapperXMLElement {
+class MyBatisMapperSql extends MyBatisMapperXmlElement {
   MyBatisMapperSql() { this.getName() = "sql" }
 
   /**
@@ -99,7 +100,7 @@ class MyBatisMapperSql extends MyBatisMapperXMLElement {
 /**
  * A `<include>` element in a `MyBatisMapperXMLElement`.
  */
-class MyBatisMapperInclude extends MyBatisMapperXMLElement {
+class MyBatisMapperInclude extends MyBatisMapperXmlElement {
   MyBatisMapperInclude() { this.getName() = "include" }
 
   /**
@@ -111,6 +112,6 @@ class MyBatisMapperInclude extends MyBatisMapperXMLElement {
 /**
  * A `<foreach>` element in a `MyBatisMapperXMLElement`.
  */
-class MyBatisMapperForeach extends MyBatisMapperXMLElement {
-  MyBatisMapperForeach() { getName() = "foreach" }
+class MyBatisMapperForeach extends MyBatisMapperXmlElement {
+  MyBatisMapperForeach() { this.getName() = "foreach" }
 }

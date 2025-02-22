@@ -94,3 +94,14 @@ end
 
 $global_var = 5
 $global_var *= 6
+
+CONSTANT1 = 5
+CONSTANT2 += 6
+CONSTANT3 ||= 7
+Foo::MemberConstant ||= 8
+foo(1).bar::OtherConstant ||= 7
+::CONSTANT4 ||= 7
+FOO, ::BAR, foo::FOO = [1, 2, 3]
+
+foo /
+5

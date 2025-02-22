@@ -6,13 +6,21 @@
   - csharp/**/*
   - change-notes/**/*csharp*
 
+Go:
+  - go/**/*
+  - change-notes/**/*go.*
+
 Java:
-  - java/**/*
+  - any: [ 'java/**/*', '!java/kotlin-extractor/**/*', '!java/ql/test/kotlin/**/*' ]
   - change-notes/**/*java.*
 
 JS:
-  - javascript/**/*
+  - any: [ 'javascript/**/*' ]
   - change-notes/**/*javascript*
+
+Kotlin:
+  - java/kotlin-extractor/**/*
+  - java/ql/test-kotlin*/**/*
 
 Python:
   - python/**/*
@@ -22,7 +30,27 @@ Ruby:
   - ruby/**/*
   - change-notes/**/*ruby*
 
+Rust:
+  - rust/**/*
+  - change-notes/**/*rust*
+
+Swift:
+  - swift/**/*
+  - change-notes/**/*swift*
+
+Actions:
+  - actions/**/*
+  - change-notes/**/*actions*
+
 documentation:
   - "**/*.qhelp"
   - "**/*.md"
   - docs/**/*
+
+"QL-for-QL":
+  - ql/**/*
+  - .github/workflows/ql-for-ql*
+
+# Since these are all shared files that need to be synced, just pick _one_ copy of each.
+"DataFlow Library":
+  - "shared/dataflow/**/*"

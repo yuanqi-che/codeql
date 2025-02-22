@@ -23,19 +23,20 @@ private int max_context_cost() {
 }
 
 private int syntactic_call_count(Scope s) {
-  exists(Function f | f = s and f.getName() != "__init__" |
-    result =
-      count(CallNode call |
-        call.getFunction().(NameNode).getId() = f.getName()
-        or
-        call.getFunction().(AttrNode).getName() = f.getName()
-      )
+  exists(Function f, string name | f = s and name = f.getName() and name != "__init__" |
+    result = count(function_call(name)) + count(method_call(name))
   )
   or
   s.getName() = "__init__" and result = 1
   or
   not s instanceof Function and result = 0
 }
+
+pragma[nomagic]
+private CallNode function_call(string name) { result.getFunction().(NameNode).getId() = name }
+
+pragma[nomagic]
+private CallNode method_call(string name) { result.getFunction().(AttrNode).getName() = name }
 
 private int incoming_call_cost(Scope s) {
   /*
@@ -121,12 +122,8 @@ private newtype TPointsToContext =
   } or
   TObjectContext(SelfInstanceInternal object)
 
-module Context {
-  PointsToContext forObject(ObjectInternal object) { result = TObjectContext(object) }
-}
-
 /**
- * Points-to context. Context can be one of:
+ * A points-to context. Context can be one of:
  *    * "main": Used for scripts.
  *    * "import": Use for non-script modules.
  *    * "default": Use for functions and methods without caller context.
@@ -256,7 +253,7 @@ predicate executes_in_runtime_context(Function f) {
 }
 
 private predicate maybe_main(Module m) {
-  exists(If i, Compare cmp, Name name, StrConst main | m.getAStmt() = i and i.getTest() = cmp |
+  exists(If i, Compare cmp, Name name, StringLiteral main | m.getAStmt() = i and i.getTest() = cmp |
     cmp.compares(name, any(Eq eq), main) and
     name.getId() = "__name__" and
     main.getText() = "__main__"

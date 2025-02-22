@@ -16,20 +16,26 @@ import semmle.python.ApiGraphs
 
 private API::Node unsafe_paramiko_policy(string name) {
   name in ["AutoAddPolicy", "WarningPolicy"] and
-  result = API::moduleImport("paramiko").getMember("client").getMember(name)
+  (
+    result = API::moduleImport("paramiko").getMember("client").getMember(name)
+    or
+    result = API::moduleImport("paramiko").getMember(name)
+  )
 }
 
-private API::Node paramikoSSHClientInstance() {
+private API::Node paramikoSshClientInstance() {
   result = API::moduleImport("paramiko").getMember("client").getMember("SSHClient").getReturn()
+  or
+  result = API::moduleImport("paramiko").getMember("SSHClient").getReturn()
 }
 
 from DataFlow::CallCfgNode call, DataFlow::Node arg, string name
 where
   // see http://docs.paramiko.org/en/stable/api/client.html#paramiko.client.SSHClient.set_missing_host_key_policy
-  call = paramikoSSHClientInstance().getMember("set_missing_host_key_policy").getACall() and
+  call = paramikoSshClientInstance().getMember("set_missing_host_key_policy").getACall() and
   arg in [call.getArg(0), call.getArgByName("policy")] and
   (
-    arg = unsafe_paramiko_policy(name).getAUse() or
-    arg = unsafe_paramiko_policy(name).getReturn().getAUse()
+    arg = unsafe_paramiko_policy(name).getAValueReachableFromSource() or
+    arg = unsafe_paramiko_policy(name).getReturn().getAValueReachableFromSource()
   )
 select call, "Setting missing host key policy to " + name + " may be unsafe."

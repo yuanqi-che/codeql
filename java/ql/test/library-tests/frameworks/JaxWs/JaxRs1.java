@@ -41,7 +41,7 @@ public class JaxRs1 { // $ RootResourceClass
   @Produces("text/plain") // $ ProducesAnnotation=text/plain
   @DELETE
   double Delete() { // $ ResourceMethod=text/plain ResourceMethodOnResourceClass
-    return 0.0; // $ XssSink
+    return 0.0;
   }
 
   @Produces(MediaType.TEXT_HTML) // $ ProducesAnnotation=text/html
@@ -77,7 +77,7 @@ public class JaxRs1 { // $ RootResourceClass
     @Produces(MediaType.TEXT_PLAIN) // $ ProducesAnnotation=text/plain
     @DELETE
     double Delete() { // $ ResourceMethod=text/plain ResourceMethodOnResourceClass
-      return 0.0; // $ XssSink
+      return 0.0;
     }
 
     @Path("")
@@ -156,12 +156,12 @@ class NotAResourceClass1 {
 class NotAResourceClass2 {
 }
 
-class ExtendsJaxRs1 extends JaxRs1 {
+class ExtendsJaxRs1 extends JaxRs1 { // $ RootResourceClass
   @Override
   int Get() { // $ ResourceMethod
     return 1;
   }
-  
+
   @Override
   @QueryParam("") // $ InjectionAnnotation
   void Post() {
@@ -189,12 +189,12 @@ class ExtendsJaxRs1 extends JaxRs1 {
 }
 
 @Produces(MediaType.TEXT_XML) // $ ProducesAnnotation=text/xml
-class ExtendsJaxRs1WithProducesAnnotation extends JaxRs1 {
+class ExtendsJaxRs1WithProducesAnnotation extends JaxRs1 { // Not a root resource class because it has a JAX-RS annotation
   @Override
   int Get() { // $ ResourceMethod=text/xml
     return 2;
   }
-  
+
   @Override
   @QueryParam("") // $ InjectionAnnotation
   void Post() {

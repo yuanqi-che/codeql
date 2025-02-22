@@ -8,8 +8,9 @@
  * @kind metric
  * @tags summary
  *       lines-of-code
+ *       debug
  */
 
-import ruby
+import codeql.ruby.AST
 
 select sum(RubyFile f | exists(f.getRelativePath()) | f.getNumberOfLinesOfCode())

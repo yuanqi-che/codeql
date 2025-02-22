@@ -178,7 +178,6 @@ class SelfInstanceInternal extends TSelfInstance, InstanceObject {
     result = "self instance of " + this.getClass().(ClassObjectInternal).getName()
   }
 
-  /** The boolean value of this object, if it has one */
   override boolean booleanValue() {
     //result = this.getClass().instancesBooleanValue()
     result = maybe()
@@ -247,8 +246,8 @@ class SelfInstanceInternal extends TSelfInstance, InstanceObject {
 
   pragma[noinline]
   override predicate binds(ObjectInternal instance, string name, ObjectInternal descriptor) {
-    exists(AttrNode attr, ClassObjectInternal cls |
-      receiver_type(attr, name, this, cls) and
+    exists(ClassObjectInternal cls |
+      receiver_type(_, name, this, cls) and
       cls_descriptor(cls, name, descriptor)
     ) and
     instance = this
@@ -350,8 +349,8 @@ class UnknownInstanceInternal extends TUnknownInstance, ObjectInternal {
 
   pragma[noinline]
   override predicate binds(ObjectInternal instance, string name, ObjectInternal descriptor) {
-    exists(AttrNode attr, ClassObjectInternal cls |
-      receiver_type(attr, name, this, cls) and
+    exists(ClassObjectInternal cls |
+      receiver_type(_, name, this, cls) and
       cls_descriptor(cls, name, descriptor)
     ) and
     instance = this

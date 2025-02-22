@@ -17,8 +17,19 @@
 import csharp
 import semmle.code.asp.WebConfig
 
-from SystemWebXMLElement web, XMLAttribute debugAttribute
+from SystemWebXmlElement web, XmlAttribute debugAttribute
 where
-  debugAttribute = web.getAChild("compilation").getAttribute("debug") and
-  not debugAttribute.getValue().toLowerCase() = "false"
+  exists(CompilationXmlElement compilation | compilation.getParent() = web |
+    debugAttribute = compilation.getAttribute("debug") and
+    not debugAttribute.getValue().toLowerCase() = "false"
+  ) and
+  not exists(
+    TransformXmlAttribute attribute, CompilationXmlElement compilation,
+    WebConfigReleaseTransformXml file
+  |
+    compilation = attribute.getElement() and
+    file = compilation.getFile() and
+    attribute.getRemoveAttributes() = "debug" and
+    file.getParentContainer() = web.getFile().getParentContainer()
+  )
 select debugAttribute, "The 'debug' flag is set for an ASP.NET configuration file."

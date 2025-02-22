@@ -21,7 +21,7 @@ private predicate relevantTypeNames(string typeName, string message) {
 }
 
 private Type getAThrownExceptionType(TryStmt t) {
-  exists(MethodAccess ma, Exception e |
+  exists(MethodCall ma, Exception e |
     t.getBlock() = ma.getEnclosingStmt().getEnclosingStmt*() and
     ma.getMethod().getAnException() = e and
     result = e.getType()
@@ -52,7 +52,7 @@ where
   // Check that all exceptions thrown in the try block are
   // either more specific than the caught type or unrelated to it.
   not exists(Type et | et = getAThrownExceptionType(t) |
-    et.(RefType).getASubtype*().hasQualifiedName("java.lang", typeName)
+    et.(RefType).getADescendant().hasQualifiedName("java.lang", typeName)
   )
 select cc,
   "Do not catch '" + cc.getVariable().getType() + "'" + "; " + message +

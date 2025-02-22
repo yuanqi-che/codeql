@@ -7,6 +7,7 @@
  * @precision medium
  * @id java/openstream-called-on-tainted-url
  * @tags security
+ *       experimental
  *       external/cwe/cwe-036
  */
 
@@ -14,10 +15,14 @@ import java
 import semmle.code.java.dataflow.TaintTracking
 import semmle.code.java.dataflow.FlowSources
 import semmle.code.java.dataflow.ExternalFlow
-import DataFlow::PathGraph
+import RemoteUrlToOpenStreamFlow::PathGraph
 
-class URLConstructor extends ClassInstanceExpr {
-  URLConstructor() { this.getConstructor().getDeclaringType() instanceof TypeUrl }
+deprecated private class ActivateModels extends ActiveExperimentalModels {
+  ActivateModels() { this = "openstream-called-on-tainted-url" }
+}
+
+class UrlConstructor extends ClassInstanceExpr {
+  UrlConstructor() { this.getConstructor().getDeclaringType() instanceof TypeUrl }
 
   Expr stringArg() {
     // Query only in URL's that were constructed by calling the single parameter string constructor.
@@ -27,37 +32,32 @@ class URLConstructor extends ClassInstanceExpr {
   }
 }
 
-class URLOpenStreamMethod extends Method {
-  URLOpenStreamMethod() {
-    this.getDeclaringType() instanceof TypeUrl and
-    this.getName() = "openStream"
-  }
-}
+module RemoteUrlToOpenStreamFlowConfig implements DataFlow::ConfigSig {
+  predicate isSource(DataFlow::Node source) { source instanceof ActiveThreatModelSource }
 
-class RemoteURLToOpenStreamFlowConfig extends TaintTracking::Configuration {
-  RemoteURLToOpenStreamFlowConfig() { this = "OpenStream::RemoteURLToOpenStreamFlowConfig" }
-
-  override predicate isSource(DataFlow::Node source) { source instanceof RemoteFlowSource }
-
-  override predicate isSink(DataFlow::Node sink) {
-    exists(MethodAccess m |
-      sink.asExpr() = m.getQualifier() and m.getMethod() instanceof URLOpenStreamMethod
+  predicate isSink(DataFlow::Node sink) {
+    exists(MethodCall m |
+      sink.asExpr() = m.getQualifier() and m.getMethod() instanceof UrlOpenStreamMethod
     )
     or
     sinkNode(sink, "url-open-stream")
   }
 
-  override predicate isAdditionalTaintStep(DataFlow::Node node1, DataFlow::Node node2) {
-    exists(URLConstructor u |
+  predicate isAdditionalFlowStep(DataFlow::Node node1, DataFlow::Node node2) {
+    exists(UrlConstructor u |
       node1.asExpr() = u.stringArg() and
       node2.asExpr() = u
     )
   }
 }
 
-from DataFlow::PathNode source, DataFlow::PathNode sink, MethodAccess call
-where
+module RemoteUrlToOpenStreamFlow = TaintTracking::Global<RemoteUrlToOpenStreamFlowConfig>;
+
+deprecated query predicate problems(
+  MethodCall call, RemoteUrlToOpenStreamFlow::PathNode source,
+  RemoteUrlToOpenStreamFlow::PathNode sink, string message
+) {
   sink.getNode().asExpr() = call.getQualifier() and
-  any(RemoteURLToOpenStreamFlowConfig c).hasFlowPath(source, sink)
-select call, source, sink,
-  "URL on which openStream is called may have been constructed from remote source"
+  RemoteUrlToOpenStreamFlow::flowPath(source, sink) and
+  message = "URL on which openStream is called may have been constructed from remote source."
+}

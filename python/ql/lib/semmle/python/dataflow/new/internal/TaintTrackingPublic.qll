@@ -14,12 +14,14 @@ private import semmle.python.Frameworks
  * Holds if taint propagates from `source` to `sink` in zero or more local
  * (intra-procedural) steps.
  */
+pragma[inline]
 predicate localTaint(DataFlow::Node source, DataFlow::Node sink) { localTaintStep*(source, sink) }
 
 /**
  * Holds if taint can flow from `e1` to `e2` in zero or more local (intra-procedural)
  * steps.
  */
+pragma[inline]
 predicate localExprTaint(Expr e1, Expr e2) {
   localTaint(DataFlow::exprNode(e1), DataFlow::exprNode(e2))
 }
@@ -32,7 +34,7 @@ predicate localTaintStep(DataFlow::Node nodeFrom, DataFlow::Node nodeTo) {
   // Ordinary data flow
   DataFlow::localFlowStep(nodeFrom, nodeTo)
   or
-  localAdditionalTaintStep(nodeFrom, nodeTo)
+  localAdditionalTaintStep(nodeFrom, nodeTo, _)
 }
 
 /**
@@ -45,6 +47,25 @@ class AdditionalTaintStep extends Unit {
   /**
    * Holds if the step from `nodeFrom` to `nodeTo` should be considered a taint
    * step for all configurations.
+   *
+   * Note that it is now possible to also specify provenance of the taint step
+   * by overwriting `step/3`.
    */
-  abstract predicate step(DataFlow::Node nodeFrom, DataFlow::Node nodeTo);
+  predicate step(DataFlow::Node nodeFrom, DataFlow::Node nodeTo) { none() }
+
+  /**
+   * Holds if the step from `nodeFrom` to `nodeTo` should be considered a taint
+   * step with provenance `model` for all configurations.
+   */
+  predicate step(DataFlow::Node nodeFrom, DataFlow::Node nodeTo, string model) { none() }
+
+  /**
+   * Holds if this `AdditionalTaintStep` defines a step from `nodeFrom` to `nodeTo`
+   * with provenance `model`.
+   */
+  final predicate hasStep(DataFlow::Node nodeFrom, DataFlow::Node nodeTo, string model) {
+    this.step(nodeFrom, nodeTo) and model = "AdditionalTaintStep"
+    or
+    this.step(nodeFrom, nodeTo, model)
+  }
 }

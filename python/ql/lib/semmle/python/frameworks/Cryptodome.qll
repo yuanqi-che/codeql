@@ -23,7 +23,8 @@ private module CryptodomeModel {
    * See https://pycryptodome.readthedocs.io/en/latest/src/public_key/rsa.html#Crypto.PublicKey.RSA.generate
    */
   class CryptodomePublicKeyRsaGenerateCall extends Cryptography::PublicKey::KeyGeneration::RsaRange,
-    DataFlow::CallCfgNode {
+    DataFlow::CallCfgNode
+  {
     CryptodomePublicKeyRsaGenerateCall() {
       this =
         API::moduleImport(["Crypto", "Cryptodome"])
@@ -44,7 +45,8 @@ private module CryptodomeModel {
    * See https://pycryptodome.readthedocs.io/en/latest/src/public_key/dsa.html#Crypto.PublicKey.DSA.generate
    */
   class CryptodomePublicKeyDsaGenerateCall extends Cryptography::PublicKey::KeyGeneration::DsaRange,
-    DataFlow::CallCfgNode {
+    DataFlow::CallCfgNode
+  {
     CryptodomePublicKeyDsaGenerateCall() {
       this =
         API::moduleImport(["Crypto", "Cryptodome"])
@@ -65,7 +67,8 @@ private module CryptodomeModel {
    * See https://pycryptodome.readthedocs.io/en/latest/src/public_key/ecc.html#Crypto.PublicKey.ECC.generate
    */
   class CryptodomePublicKeyEccGenerateCall extends Cryptography::PublicKey::KeyGeneration::EccRange,
-    DataFlow::CallCfgNode {
+    DataFlow::CallCfgNode
+  {
     CryptodomePublicKeyEccGenerateCall() {
       this =
         API::moduleImport(["Crypto", "Cryptodome"])
@@ -80,7 +83,7 @@ private module CryptodomeModel {
 
     /** Gets the name of the curve to use, as well as the origin that explains how we obtained this name. */
     string getCurveWithOrigin(DataFlow::Node origin) {
-      exists(StrConst str | origin = DataFlow::exprNode(str) |
+      exists(StringLiteral str | origin = DataFlow::exprNode(str) |
         origin = this.getCurveArg().getALocalSource() and
         result = str.getText()
       )
@@ -105,24 +108,27 @@ private module CryptodomeModel {
    * A cryptographic operation on an instance from the `Cipher` subpackage of `Cryptodome`/`Crypto`.
    */
   class CryptodomeGenericCipherOperation extends Cryptography::CryptographicOperation::Range,
-    DataFlow::CallCfgNode {
+    DataFlow::CallCfgNode
+  {
     string methodName;
     string cipherName;
+    API::CallNode newCall;
 
     CryptodomeGenericCipherOperation() {
       methodName in [
           "encrypt", "decrypt", "verify", "update", "hexverify", "encrypt_and_digest",
           "decrypt_and_verify"
         ] and
-      this =
+      newCall =
         API::moduleImport(["Crypto", "Cryptodome"])
             .getMember("Cipher")
             .getMember(cipherName)
             .getMember("new")
-            .getReturn()
-            .getMember(methodName)
-            .getACall()
+            .getACall() and
+      this = newCall.getReturn().getMember(methodName).getACall()
     }
+
+    override DataFlow::Node getInitialization() { result = newCall }
 
     override Cryptography::CryptographicAlgorithm getAlgorithm() { result.matchesName(cipherName) }
 
@@ -155,27 +161,44 @@ private module CryptodomeModel {
           this.getArgByName("mac_tag")
         ]
     }
+
+    override Cryptography::BlockMode getBlockMode() {
+      // `modeName` is of the form "MODE_<BlockMode>"
+      exists(string modeName |
+        newCall.getArg(1) =
+          API::moduleImport(["Crypto", "Cryptodome"])
+              .getMember("Cipher")
+              .getMember(cipherName)
+              .getMember(modeName)
+              .getAValueReachableFromSource()
+      |
+        result = modeName.splitAt("_", 1)
+      )
+    }
   }
 
   /**
    * A cryptographic operation on an instance from the `Signature` subpackage of `Cryptodome`/`Crypto`.
    */
   class CryptodomeGenericSignatureOperation extends Cryptography::CryptographicOperation::Range,
-    DataFlow::CallCfgNode {
+    DataFlow::CallCfgNode
+  {
+    API::CallNode newCall;
     string methodName;
     string signatureName;
 
     CryptodomeGenericSignatureOperation() {
       methodName in ["sign", "verify"] and
-      this =
+      newCall =
         API::moduleImport(["Crypto", "Cryptodome"])
             .getMember("Signature")
             .getMember(signatureName)
             .getMember("new")
-            .getReturn()
-            .getMember(methodName)
-            .getACall()
+            .getACall() and
+      this = newCall.getReturn().getMember(methodName).getACall()
     }
+
+    override DataFlow::Node getInitialization() { result = newCall }
 
     override Cryptography::CryptographicAlgorithm getAlgorithm() {
       result.matchesName(signatureName)
@@ -192,28 +215,37 @@ private module CryptodomeModel {
         result in [this.getArg(1), this.getArgByName("signature")]
       )
     }
+
+    override Cryptography::BlockMode getBlockMode() { none() }
   }
 
   /**
    * A cryptographic operation on an instance from the `Hash` subpackage of `Cryptodome`/`Crypto`.
    */
   class CryptodomeGenericHashOperation extends Cryptography::CryptographicOperation::Range,
-    DataFlow::CallCfgNode {
+    DataFlow::CallCfgNode
+  {
+    API::CallNode newCall;
     string hashName;
 
     CryptodomeGenericHashOperation() {
       exists(API::Node hashModule |
         hashModule =
-          API::moduleImport(["Crypto", "Cryptodome"]).getMember("Hash").getMember(hashName)
+          API::moduleImport(["Crypto", "Cryptodome"]).getMember("Hash").getMember(hashName) and
+        newCall = hashModule.getMember("new").getACall()
       |
-        this = hashModule.getMember("new").getACall()
+        this = newCall
         or
-        this = hashModule.getMember("new").getReturn().getMember("update").getACall()
+        this = newCall.getReturn().getMember("update").getACall()
       )
     }
+
+    override DataFlow::Node getInitialization() { result = newCall }
 
     override Cryptography::CryptographicAlgorithm getAlgorithm() { result.matchesName(hashName) }
 
     override DataFlow::Node getAnInput() { result in [this.getArg(0), this.getArgByName("data")] }
+
+    override Cryptography::BlockMode getBlockMode() { none() }
   }
 }

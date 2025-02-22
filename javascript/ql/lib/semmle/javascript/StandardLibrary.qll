@@ -50,7 +50,8 @@ class DirectEval extends CallExpr {
  * argument as the receiver to the callback.
  */
 private class ArrayIterationCallbackAsPartialInvoke extends DataFlow::PartialInvokeNode::Range,
-  DataFlow::MethodCallNode {
+  DataFlow::MethodCallNode
+{
   ArrayIterationCallbackAsPartialInvoke() {
     this.getNumArgument() = 2 and
     // Filter out library methods named 'forEach' etc
@@ -68,7 +69,7 @@ private class ArrayIterationCallbackAsPartialInvoke extends DataFlow::PartialInv
  * A flow step propagating the exception thrown from a callback to a method whose name coincides
  * a built-in Array iteration method, such as `forEach` or `map`.
  */
-private class IteratorExceptionStep extends DataFlow::SharedFlowStep {
+private class IteratorExceptionStep extends DataFlow::LegacyFlowStep {
   override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
     exists(DataFlow::MethodCallNode call |
       call.getMethodName() = ["forEach", "each", "map", "filter", "some", "every", "fold", "reduce"] and
@@ -117,6 +118,12 @@ class StringReplaceCall extends DataFlow::MethodCallNode {
   predicate isGlobal() { this.getRegExp().isGlobal() or this.getMethodName() = "replaceAll" }
 
   /**
+   * Holds if this is a global replacement, that is, the first argument is a regular expression
+   * with the `g` flag or unknown flags, or this is a call to `.replaceAll()`.
+   */
+  predicate maybeGlobal() { this.getRegExp().maybeGlobal() or this.getMethodName() = "replaceAll" }
+
+  /**
    * Holds if this call to `replace` replaces `old` with `new`.
    */
   predicate replaces(string old, string new) {
@@ -152,6 +159,15 @@ class StringReplaceCall extends DataFlow::MethodCallNode {
       guard.dominates(ret.getBasicBlock()) and
       new = ret.getStringValue()
     )
+  }
+
+  /**
+   * Holds if this call takes a regexp containing a wildcard-like term such as `.`.
+   *
+   * Also see `RegExp::isWildcardLike`.
+   */
+  final predicate hasRegExpContainingWildcard() {
+    RegExp::isWildcardLike(this.getRegExp().getRoot().getAChild*())
   }
 }
 
@@ -191,4 +207,36 @@ class StringSplitCall extends DataFlow::MethodCallNode {
    */
   bindingset[i]
   DataFlow::Node getASubstringRead(int i) { result = this.getAPropertyRead(i.toString()) }
+}
+
+/**
+ * A call to `Object.prototype.hasOwnProperty`, `Object.hasOwn`, or a library that implements
+ * the same functionality.
+ */
+class HasOwnPropertyCall extends DataFlow::Node instanceof DataFlow::CallNode {
+  DataFlow::Node object;
+  DataFlow::Node property;
+
+  HasOwnPropertyCall() {
+    // Make sure we handle reflective calls since libraries love to do that.
+    super.getCalleeNode().getALocalSource().(DataFlow::PropRead).getPropertyName() =
+      "hasOwnProperty" and
+    object = super.getReceiver() and
+    property = super.getArgument(0)
+    or
+    this =
+      [
+        DataFlow::globalVarRef("Object").getAMemberCall("hasOwn"), //
+        DataFlow::moduleImport("has").getACall(), //
+        LodashUnderscore::member("has").getACall()
+      ] and
+    object = super.getArgument(0) and
+    property = super.getArgument(1)
+  }
+
+  /** Gets the object whose property is being checked. */
+  DataFlow::Node getObject() { result = object }
+
+  /** Gets the property being checked. */
+  DataFlow::Node getProperty() { result = property }
 }

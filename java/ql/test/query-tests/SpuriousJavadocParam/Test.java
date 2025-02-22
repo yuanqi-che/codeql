@@ -119,4 +119,18 @@ public class Test<V> {
    * @param <X> does not exist
    */
   interface GenericInterface<T> {}
+
+  /**
+   * @param i exists
+   * @param k does not
+   */
+  static record SomeRecord(int i, int j) {}
+
+  /**
+   * @param <T> exists
+   * @param <U> does not
+   * @param i exists
+   * @param k does not
+   */
+  static record GenericRecord<T>(int i, int j) {}
 }

@@ -46,7 +46,7 @@ public class UnsafeHostnameVerification {
     private void functionThatActuallyDisablesVerification() {
         HttpsURLConnection.setDefaultHostnameVerifier((name, s) -> true); // GOOD [but detected as BAD], because we only
                                                                           // check guards inside a function
-        // and not accross function calls. This is considerer GOOD because the call to
+        // and not across function calls. This is considerer GOOD because the call to
         // `functionThatActuallyDisablesVerification` is guarded by a feature flag in
         // `testGuardedByFlagAccrossCalls`.
         // Although this is not ideal as another function could directly call
@@ -100,4 +100,20 @@ public class UnsafeHostnameVerification {
             return true; // BAD, always returns true
         }
     };
+
+    private static class AlwaysTrueVerifier implements HostnameVerifier {
+        @Override
+        public boolean verify(String hostname, SSLSession session) {
+            return true; // BAD, always returns true
+        }
+    }
+
+    /**
+     * Same as testTrustAllHostnameOfAnonymousClass, but with a named class.
+     * This is for testing the diff-informed functionality of the query.
+     */
+    public void testTrustAllHostnameOfNamedClass() {
+        HttpsURLConnection.setDefaultHostnameVerifier(new AlwaysTrueVerifier());
+    }
+
 }

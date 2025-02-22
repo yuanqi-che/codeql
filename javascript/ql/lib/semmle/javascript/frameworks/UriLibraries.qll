@@ -1,23 +1,13 @@
 /**
- * Provides classes for modelling URI libraries.
+ * Provides classes for modeling URI libraries.
  */
 
 import javascript
 
 /**
- * DEPRECATED. Use `TaintTracking::SharedTaintStep` or `TaintTracking::uriStep` instead.
- *
- * A taint propagating data flow edge arising from an operation in a URI library.
- */
-abstract deprecated class UriLibraryStep extends DataFlow::ValueNode {
-  /** Holds if `pred -> succ` is a step through a URI library function. */
-  predicate step(DataFlow::Node pred, DataFlow::Node succ) { none() }
-}
-
-/**
  * Provides classes for working with [urijs](http://medialize.github.io/URI.js/) code.
  */
-module urijs {
+module Urijs {
   /**
    * Gets a data flow source node for the urijs library.
    */
@@ -83,7 +73,7 @@ module urijs {
 /**
  * Provides classes for working with [uri-js](https://github.com/garycourt/uri-js) code.
  */
-module uridashjs {
+module Uridashjs {
   /**
    * Gets a data flow source node for member `name` of the uridashjs library.
    */
@@ -108,7 +98,7 @@ module uridashjs {
 /**
  * Provides classes for working with [punycode](https://github.com/bestiejs/punycode.js) code.
  */
-module punycode {
+module Punycode {
   /**
    * Gets a data flow source node for member `name` of the punycode library.
    */
@@ -133,7 +123,7 @@ module punycode {
 /**
  * Provides classes for working with [url-parse](https://github.com/unshiftio/url-parse) code.
  */
-module urlParse {
+module UrlParse {
   /**
    * Gets a data flow source node for the url-parse library.
    */
@@ -170,12 +160,17 @@ module urlParse {
 /**
  * Provides classes for working with [querystringify](https://github.com/unshiftio/querystringify) code.
  */
-module querystringify {
+module Querystringify {
   /**
    * Gets a data flow source node for member `name` of the querystringify library.
    */
   DataFlow::SourceNode querystringifyMember(string name) {
-    result = DataFlow::moduleMember("querystringify", name)
+    result = querystringify().getMember(name).asSource()
+  }
+
+  /** Gets an API node referring to the `querystringify` module. */
+  private API::Node querystringify() {
+    result = [API::moduleImport("querystringify"), API::moduleImport("url-parse").getMember("qs")]
   }
 
   /**
@@ -184,7 +179,7 @@ module querystringify {
   private class Step extends TaintTracking::SharedTaintStep {
     override predicate uriStep(DataFlow::Node pred, DataFlow::Node succ) {
       exists(DataFlow::CallNode call |
-        call = querystringifyMember(["parse", "stringify"]).getACall() and
+        call = querystringify().getMember(["parse", "stringify"]).getACall() and
         pred = call.getAnArgument() and
         succ = call
       )
@@ -195,7 +190,7 @@ module querystringify {
 /**
  * Provides classes for working with [query-string](https://github.com/sindresorhus/query-string) code.
  */
-module querydashstring {
+module Querydashstring {
   /**
    * Gets a data flow source node for member `name` of the query-string library.
    */
@@ -220,7 +215,7 @@ module querydashstring {
 /**
  * Provides classes for working with [url](https://nodejs.org/api/url.html) code.
  */
-module url {
+module Url {
   /**
    * Gets a data flow source node for member `name` of the url library.
    */
@@ -243,7 +238,7 @@ module url {
 /**
  * Provides classes for working with [querystring](https://nodejs.org/api/querystring.html) code.
  */
-module querystring {
+module Querystring {
   /**
    * Gets a data flow source node for member `name` of the querystring library.
    */
@@ -333,29 +328,31 @@ private module ClosureLibraryUri {
         // static methods in goog.uri.utils
         arg = 0 and
         exists(string name | invoke = Closure::moduleImport("goog.uri.utils." + name).getACall() |
-          name = "appendParam" or // preserve taint from the original URI, but not from the appended param
-          name = "appendParams" or
-          name = "appendParamsFromMap" or
-          name = "appendPath" or
-          name = "getParamValue" or
-          name = "getParamValues" or
-          name = "getPath" or
-          name = "getPathAndAfter" or
-          name = "getQueryData" or
-          name = "parseQueryData" or
-          name = "removeFragment" or
-          name = "removeParam" or
-          name = "setParam" or
-          name = "setParamsFromMap" or
-          name = "setPath" or
-          name = "split"
+          name =
+            [
+              "appendParam", // preserve taint from the original URI, but not from the appended param
+              "appendParams", //
+              "appendParamsFromMap", //
+              "appendPath", //
+              "getParamValue", //
+              "getParamValues", //
+              "getPath", //
+              "getPathAndAfter", //
+              "getQueryData", //
+              "parseQueryData", //
+              "removeFragment", //
+              "removeParam", //
+              "setParam", //
+              "setParamsFromMap", //
+              "setPath", //
+              "split", //
+            ]
         )
         or
         // static methods in goog.string
         arg = 0 and
         exists(string name | invoke = Closure::moduleImport("goog.string." + name).getACall() |
-          name = "urlDecode" or
-          name = "urlEncode"
+          name = ["urlDecode", "urlEncode"]
         )
       )
     }
@@ -403,7 +400,7 @@ private module ClosureLibraryUri {
   /**
    * Provides classes for working with [path](https://nodejs.org/api/path.html) code.
    */
-  module path {
+  module Path {
     /**
      * A taint step in the path module.
      */

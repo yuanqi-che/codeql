@@ -13,13 +13,15 @@
 import python
 import semmle.python.Concepts
 
-from Cryptography::CryptographicOperation operation, Cryptography::CryptographicAlgorithm algorithm
+from Cryptography::CryptographicOperation operation, string msgPrefix
 where
-  algorithm = operation.getAlgorithm() and
-  algorithm.isWeak() and
   // `Cryptography::HashingAlgorithm` and `Cryptography::PasswordHashingAlgorithm` are
   // handled by `py/weak-sensitive-data-hashing`
-  algorithm instanceof Cryptography::EncryptionAlgorithm
-select operation,
-  "The cryptographic algorithm " + algorithm.getName() +
-    " is broken or weak, and should not be used."
+  exists(Cryptography::EncryptionAlgorithm algorithm | algorithm = operation.getAlgorithm() |
+    algorithm.isWeak() and
+    msgPrefix = "The cryptographic algorithm " + algorithm.getName()
+  )
+  or
+  operation.getBlockMode().isWeak() and msgPrefix = "The block mode " + operation.getBlockMode()
+select operation, "$@ is broken or weak, and should not be used.", operation.getInitialization(),
+  msgPrefix

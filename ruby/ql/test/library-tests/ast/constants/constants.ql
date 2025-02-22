@@ -1,5 +1,6 @@
-import ruby
+import codeql.ruby.AST
 import codeql.ruby.ast.internal.Module as M
+import codeql.ruby.ast.internal.Constant
 
 query predicate constantAccess(ConstantAccess a, string kind, string name, string cls) {
   (
@@ -18,5 +19,7 @@ query Expr lookupConst(Module m, string name) { result = M::lookupConst(m, name)
 query predicate constantValue(ConstantReadAccess a, Expr e) { e = a.getValue() }
 
 query predicate constantWriteAccessQualifiedName(ConstantWriteAccess w, string qualifiedName) {
-  w.getQualifiedName() = qualifiedName
+  w.getAQualifiedName() = qualifiedName
 }
+
+query predicate arrayConstant = isArrayConstant/2;

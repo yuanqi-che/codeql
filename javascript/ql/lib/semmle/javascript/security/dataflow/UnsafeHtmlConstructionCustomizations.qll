@@ -13,6 +13,7 @@ module UnsafeHtmlConstruction {
   private import semmle.javascript.security.dataflow.DomBasedXssCustomizations::DomBasedXss as DomBasedXss
   private import semmle.javascript.security.dataflow.UnsafeJQueryPluginCustomizations::UnsafeJQueryPlugin as UnsafeJQueryPlugin
   private import semmle.javascript.PackageExports as Exports
+  import semmle.javascript.security.CommonFlowState
 
   /**
    * A source for unsafe HTML constructed from library input.
@@ -22,7 +23,7 @@ module UnsafeHtmlConstruction {
   /**
    * A parameter of an exported function, seen as a source for usnafe HTML constructed from input.
    */
-  class ExternalInputSource extends Source, DataFlow::ParameterNode {
+  class ExternalInputSource extends Source {
     ExternalInputSource() {
       this = Exports::getALibraryInputParameter() and
       // An AMD-style module sometimes loads the jQuery library in a way which looks like library input.
@@ -34,7 +35,7 @@ module UnsafeHtmlConstruction {
    * A jQuery plugin options object, seen as a source for unsafe HTML constructed from input.
    */
   class JQueryPluginOptionsAsSource extends Source {
-    JQueryPluginOptionsAsSource() { this instanceof UnsafeJQueryPlugin::JQueryPluginOptions }
+    JQueryPluginOptionsAsSource() { this = any(JQuery::JQueryPluginMethod meth).getAParameter() }
   }
 
   /**
@@ -45,7 +46,7 @@ module UnsafeHtmlConstruction {
     /**
      * Gets the kind of vulnerability to report in the alert message.
      *
-     * Defaults to `Cross-site scripting`, but may be overriden for sinks
+     * Defaults to `Cross-site scripting`, but may be overridden for sinks
      * that do not allow script injection, but injection of other undesirable HTML elements.
      */
     abstract string getVulnerabilityKind();
@@ -59,6 +60,41 @@ module UnsafeHtmlConstruction {
      * Gets a string describing the transformation that this sink represents.
      */
     abstract string describe();
+  }
+
+  /**
+   * A barrier guard for unsafe HTML constructed from library input vulnerabilities.
+   */
+  abstract class BarrierGuard extends DataFlow::Node {
+    /**
+     * Holds if this node acts as a barrier for data flow, blocking further flow from `e` if `this` evaluates to `outcome`.
+     */
+    predicate blocksExpr(boolean outcome, Expr e) { none() }
+
+    /**
+     * Holds if this node acts as a barrier for `state`, blocking further flow from `e` if `this` evaluates to `outcome`.
+     */
+    predicate blocksExpr(boolean outcome, Expr e, FlowState state) { none() }
+
+    /** DEPRECATED. Use `blocksExpr` instead. */
+    deprecated predicate sanitizes(boolean outcome, Expr e) { this.blocksExpr(outcome, e) }
+
+    /** DEPRECATED. Use `blocksExpr` instead. */
+    deprecated predicate sanitizes(boolean outcome, Expr e, DataFlow::FlowLabel label) {
+      this.blocksExpr(outcome, e, FlowState::fromFlowLabel(label))
+    }
+  }
+
+  /** A subclass of `BarrierGuard` that is used for backward compatibility with the old data flow library. */
+  deprecated final private class BarrierGuardLegacy extends TaintTracking::SanitizerGuardNode instanceof BarrierGuard
+  {
+    override predicate sanitizes(boolean outcome, Expr e) {
+      BarrierGuard.super.sanitizes(outcome, e)
+    }
+
+    override predicate sanitizes(boolean outcome, Expr e, DataFlow::FlowLabel label) {
+      BarrierGuard.super.sanitizes(outcome, e, label)
+    }
   }
 
   /**
@@ -80,7 +116,7 @@ module UnsafeHtmlConstruction {
     t.start() and
     result = sink
     or
-    exists(DataFlow::TypeBackTracker t2 | t = t2.smallstep(result, isUsedInXssSink(t2, sink)))
+    exists(DataFlow::TypeBackTracker t2 | t2 = t.smallstep(result, isUsedInXssSink(t2, sink)))
     or
     exists(DataFlow::TypeBackTracker t2 |
       t.continue() = t2 and
@@ -139,8 +175,8 @@ module UnsafeHtmlConstruction {
   /**
    * A string-concatenation of HTML, where the result is used as an XSS sink.
    */
-  class HTMLConcatenationSink extends XssSink, StringOps::HtmlConcatenationLeaf {
-    HTMLConcatenationSink() { isUsedInXssSink(xssSink) = this.getRoot() }
+  class HtmlConcatenationSink extends XssSink, StringOps::HtmlConcatenationLeaf {
+    HtmlConcatenationSink() { isUsedInXssSink(xssSink) = this.getRoot() }
 
     override string describe() { result = "HTML construction" }
   }
@@ -148,12 +184,12 @@ module UnsafeHtmlConstruction {
   /**
    * A string parsed as XML, which is later used in an XSS sink.
    */
-  class XMLParsedSink extends XssSink {
-    XML::ParserInvocation parser;
-
-    XMLParsedSink() {
-      this.asExpr() = parser.getSourceArgument() and
-      isUsedInXssSink(xssSink) = parser.getAResult()
+  class XmlParsedSink extends XssSink {
+    XmlParsedSink() {
+      exists(XML::ParserInvocation parser |
+        this.asExpr() = parser.getSourceArgument() and
+        isUsedInXssSink(xssSink) = parser.getAResult()
+      )
     }
 
     override string describe() { result = "XML parsing" }
@@ -166,12 +202,27 @@ module UnsafeHtmlConstruction {
     MarkdownSink() {
       exists(DataFlow::Node pred, DataFlow::Node succ, Markdown::MarkdownStep step |
         step.step(pred, succ) and
-        step.preservesHTML() and
+        step.preservesHtml() and
         this = pred and
         succ = isUsedInXssSink(xssSink)
       )
     }
 
-    override string describe() { result = "Markdown rendering" }
+    override string describe() { result = "markdown rendering" }
+  }
+
+  /** A test for the value of `typeof x`, restricting the potential types of `x`. */
+  class TypeTestGuard extends BarrierGuard, DataFlow::ValueNode {
+    override EqualityTest astNode;
+    Expr operand;
+    boolean polarity;
+
+    TypeTestGuard() { TaintTracking::isStringTypeGuard(astNode, operand, polarity) }
+
+    override predicate blocksExpr(boolean outcome, Expr e, FlowState state) {
+      polarity = outcome and
+      e = operand and
+      state.isTaint()
+    }
   }
 }

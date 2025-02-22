@@ -48,6 +48,20 @@ class AssignExpr extends Assignment, @assignexpr {
 }
 
 /**
+ * A compiler generated assignment operation that may occur in a compiler generated
+ * copy/move constructor or assignment operator, and which functions like `memcpy`
+ * where the size argument is based on the type of the rvalue of the assignment.
+ */
+class BlockAssignExpr extends Assignment, @blockassignexpr {
+  override string getOperator() { result = "=" }
+
+  override string getAPrimaryQlClass() { result = "BlockAssignExpr" }
+
+  /** Gets a textual representation of this assignment. */
+  override string toString() { result = "... = ..." }
+}
+
+/**
  * A non-overloaded binary assignment operation other than `=`.
  *
  * This class does _not_ include variable initializers. To get a variable
@@ -226,20 +240,19 @@ class AssignPointerSubExpr extends AssignOperation, @assignpsubexpr {
  * ```
  */
 class ConditionDeclExpr extends Expr, @condition_decl {
-  /**
-   * DEPRECATED: Use `getVariableAccess()` or `getInitializingExpr()` instead.
-   *
-   * Gets the access using the condition for this declaration.
-   */
-  deprecated Expr getExpr() { result = this.getChild(0) }
-
   override string getAPrimaryQlClass() { result = "ConditionDeclExpr" }
 
   /**
    * Gets the compiler-generated variable access that conceptually occurs after
-   * the initialization of the declared variable.
+   * the initialization of the declared variable, if any.
    */
-  VariableAccess getVariableAccess() { result = this.getChild(0) }
+  VariableAccess getVariableAccess() { result = this.getExpr() }
+
+  /**
+   * Gets the expression that is evaluated after the initialization of the declared
+   * variable.
+   */
+  Expr getExpr() { result = this.getChild(0) }
 
   /**
    * Gets the expression that initializes the declared variable. This predicate

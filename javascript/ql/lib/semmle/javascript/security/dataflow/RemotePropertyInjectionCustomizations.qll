@@ -31,12 +31,14 @@ module RemotePropertyInjection {
   abstract class Sanitizer extends DataFlow::Node { }
 
   /**
-   * A source of remote user input, considered as a flow source for remote property
-   * injection.
+   * DEPRECATED: Use `ActiveThreatModelSource` from Concepts instead!
    */
-  class RemoteFlowSourceAsSource extends Source {
-    RemoteFlowSourceAsSource() { this instanceof RemoteFlowSource }
-  }
+  deprecated class RemoteFlowSourceAsSource = ActiveThreatModelSourceAsSource;
+
+  /**
+   * An active threat-model source, considered as a flow source.
+   */
+  private class ActiveThreatModelSourceAsSource extends Source, ActiveThreatModelSource { }
 
   /**
    * A sink for property writes with dynamically computed property name.
@@ -47,7 +49,7 @@ module RemotePropertyInjection {
       exists(DeleteExpr expr | expr.getOperand().(PropAccess).getPropertyNameExpr() = astNode)
     }
 
-    override string getMessage() { result = " a property name to write to." }
+    override string getMessage() { result = "A property name to write to" }
   }
 
   /**
@@ -57,14 +59,14 @@ module RemotePropertyInjection {
    * header names as properties. This case is already handled by
    * `PropertyWriteSink`.
    */
-  class HeaderNameSink extends Sink, DataFlow::ValueNode {
+  class HeaderNameSink extends Sink {
     HeaderNameSink() {
-      exists(HTTP::ExplicitHeaderDefinition hd |
+      exists(Http::ExplicitHeaderDefinition hd |
         not hd instanceof Express::SetMultipleHeaders and
-        astNode = hd.getNameExpr()
+        this = hd.getNameNode()
       )
     }
 
-    override string getMessage() { result = " a header name." }
+    override string getMessage() { result = "A header name" }
   }
 }

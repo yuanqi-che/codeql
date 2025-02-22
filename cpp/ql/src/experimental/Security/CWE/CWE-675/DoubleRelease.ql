@@ -6,6 +6,7 @@
  * @problem.severity warning
  * @precision medium
  * @tags security
+ *       experimental
  *       external/cwe/cwe-675
  *       external/cwe/cwe-666
  */
@@ -24,9 +25,9 @@ class CallMayNotReturn extends FunctionCall {
     not exists(this.(ControlFlowNode).getASuccessor())
     or
     // call to another function that may not return
-    exists(CallMayNotReturn exit | getTarget() = exit.getEnclosingFunction())
+    exists(CallMayNotReturn exit | this.getTarget() = exit.getEnclosingFunction())
     or
-    exists(ThrowExpr tex | tex = this.(ControlFlowNode).getASuccessor())
+    this.(ControlFlowNode).getASuccessor() instanceof ThrowExpr
   }
 }
 
@@ -127,7 +128,7 @@ predicate similarArguments(FunctionCall fc, FunctionCall fc1) {
 
 from FunctionCall fc, FunctionCall fc1
 where
-  not exists(CallMayNotReturn fctmp | fctmp = fc.getASuccessor*()) and
+  not fc.getASuccessor*() instanceof CallMayNotReturn and
   not exists(IfStmt ifs | ifs.getCondition().getAChild*() = fc) and
   (
     // detecting a repeated call situation within one function

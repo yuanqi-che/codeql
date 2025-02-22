@@ -26,7 +26,13 @@ class CheckedCast extends CastExpr {
 predicate hasTypeTest(Variable v) {
   any(InstanceOfExpr ioe).getExpr() = v.getAnAccess()
   or
-  exists(MethodAccess ma |
+  any(NotInstanceOfExpr nioe).getExpr() = v.getAnAccess()
+  or
+  any(SafeCastExpr sce).getExpr() = v.getAnAccess()
+  or
+  any(ClassExpr c).getExpr() = v.getAnAccess()
+  or
+  exists(MethodCall ma |
     ma.getMethod().getName() = "getClass" and
     ma.getQualifier() = v.getAnAccess()
   )
@@ -58,13 +64,14 @@ class UnimplementedEquals extends EqualsMethod {
 
 from EqualsMethod m
 where
+  m.getFile().isJavaSourceFile() and
   exists(m.getBody()) and
   exists(Parameter p | p = m.getAParameter() |
     // The parameter has no type test
     not hasTypeTest(p) and
     // If the parameter is passed to a method for which we don't have the source
     // we assume it's ok
-    not exists(MethodAccess ma |
+    not exists(MethodCall ma |
       not exists(ma.getMethod().getBody()) and
       ma.getAnArgument() = p.getAnAccess()
     )
@@ -73,4 +80,4 @@ where
   // Exclude `equals` methods that implement reference-equality.
   not m instanceof ReferenceEquals and
   not m instanceof UnimplementedEquals
-select m, "equals() method does not seem to check argument type."
+select m, "This 'equals()' method does not check argument type."

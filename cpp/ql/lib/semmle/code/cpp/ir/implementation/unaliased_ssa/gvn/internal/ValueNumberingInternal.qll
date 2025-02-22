@@ -99,13 +99,19 @@ private predicate filteredNumberableInstruction(Instruction instr) {
   // count rather than strictcount to handle missing AST elements
   // separate instanceof and inline casts to avoid failed casts with a count of 0
   instr instanceof VariableAddressInstruction and
-  count(instr.(VariableAddressInstruction).getIRVariable().getAST()) != 1
+  count(instr.(VariableAddressInstruction).getIRVariable().getAst()) != 1
   or
   instr instanceof ConstantInstruction and
   count(instr.getResultIRType()) != 1
   or
   instr instanceof FieldAddressInstruction and
   count(instr.(FieldAddressInstruction).getField()) != 1
+  or
+  instr instanceof InheritanceConversionInstruction and
+  (
+    count(instr.(InheritanceConversionInstruction).getBaseClass()) != 1 or
+    count(instr.(InheritanceConversionInstruction).getDerivedClass()) != 1
+  )
 }
 
 private predicate variableAddressValueNumber(
@@ -115,8 +121,7 @@ private predicate variableAddressValueNumber(
   // The underlying AST element is used as value-numbering key instead of the
   // `IRVariable` to work around a problem where a variable or expression with
   // multiple types gives rise to multiple `IRVariable`s.
-  instr.getIRVariable().getAST() = ast and
-  strictcount(instr.getIRVariable().getAST()) = 1
+  unique( | | instr.getIRVariable().getAst()) = ast
 }
 
 private predicate initializeParameterValueNumber(
@@ -126,15 +131,14 @@ private predicate initializeParameterValueNumber(
   // The underlying AST element is used as value-numbering key instead of the
   // `IRVariable` to work around a problem where a variable or expression with
   // multiple types gives rise to multiple `IRVariable`s.
-  instr.getIRVariable().getAST() = var
+  instr.getIRVariable().getAst() = var
 }
 
 private predicate constantValueNumber(
   ConstantInstruction instr, IRFunction irFunc, IRType type, string value
 ) {
   instr.getEnclosingIRFunction() = irFunc and
-  strictcount(instr.getResultIRType()) = 1 and
-  instr.getResultIRType() = type and
+  unique( | | instr.getResultIRType()) = type and
   instr.getValue() = value
 }
 
@@ -151,31 +155,58 @@ private predicate fieldAddressValueNumber(
   TValueNumber objectAddress
 ) {
   instr.getEnclosingIRFunction() = irFunc and
-  instr.getField() = field and
-  strictcount(instr.getField()) = 1 and
+  unique( | | instr.getField()) = field and
   tvalueNumber(instr.getObjectAddress()) = objectAddress
+}
+
+pragma[nomagic]
+private predicate binaryValueNumber0(
+  BinaryInstruction instr, IRFunction irFunc, Opcode opcode, boolean isLeft,
+  TValueNumber valueNumber
+) {
+  not instr instanceof PointerArithmeticInstruction and
+  instr.getEnclosingIRFunction() = irFunc and
+  instr.getOpcode() = opcode and
+  (
+    isLeft = true and
+    tvalueNumber(instr.getLeft()) = valueNumber
+    or
+    isLeft = false and
+    tvalueNumber(instr.getRight()) = valueNumber
+  )
 }
 
 private predicate binaryValueNumber(
   BinaryInstruction instr, IRFunction irFunc, Opcode opcode, TValueNumber leftOperand,
   TValueNumber rightOperand
 ) {
+  binaryValueNumber0(instr, irFunc, opcode, true, leftOperand) and
+  binaryValueNumber0(instr, irFunc, opcode, false, rightOperand)
+}
+
+pragma[nomagic]
+private predicate pointerArithmeticValueNumber0(
+  PointerArithmeticInstruction instr, IRFunction irFunc, Opcode opcode, int elementSize,
+  boolean isLeft, TValueNumber valueNumber
+) {
   instr.getEnclosingIRFunction() = irFunc and
-  not instr instanceof PointerArithmeticInstruction and
   instr.getOpcode() = opcode and
-  tvalueNumber(instr.getLeft()) = leftOperand and
-  tvalueNumber(instr.getRight()) = rightOperand
+  instr.getElementSize() = elementSize and
+  (
+    isLeft = true and
+    tvalueNumber(instr.getLeft()) = valueNumber
+    or
+    isLeft = false and
+    tvalueNumber(instr.getRight()) = valueNumber
+  )
 }
 
 private predicate pointerArithmeticValueNumber(
   PointerArithmeticInstruction instr, IRFunction irFunc, Opcode opcode, int elementSize,
   TValueNumber leftOperand, TValueNumber rightOperand
 ) {
-  instr.getEnclosingIRFunction() = irFunc and
-  instr.getOpcode() = opcode and
-  instr.getElementSize() = elementSize and
-  tvalueNumber(instr.getLeft()) = leftOperand and
-  tvalueNumber(instr.getRight()) = rightOperand
+  pointerArithmeticValueNumber0(instr, irFunc, opcode, elementSize, true, leftOperand) and
+  pointerArithmeticValueNumber0(instr, irFunc, opcode, elementSize, false, rightOperand)
 }
 
 private predicate unaryValueNumber(
@@ -195,19 +226,33 @@ private predicate inheritanceConversionValueNumber(
 ) {
   instr.getEnclosingIRFunction() = irFunc and
   instr.getOpcode() = opcode and
-  instr.getBaseClass() = baseClass and
-  instr.getDerivedClass() = derivedClass and
-  tvalueNumber(instr.getUnary()) = operand
+  tvalueNumber(instr.getUnary()) = operand and
+  unique( | | instr.getBaseClass()) = baseClass and
+  unique( | | instr.getDerivedClass()) = derivedClass
+}
+
+pragma[nomagic]
+private predicate loadTotalOverlapValueNumber0(
+  LoadTotalOverlapInstruction instr, IRFunction irFunc, IRType type, TValueNumber valueNumber,
+  boolean isAddress
+) {
+  instr.getEnclosingIRFunction() = irFunc and
+  instr.getResultIRType() = type and
+  (
+    isAddress = true and
+    tvalueNumberOfOperand(instr.getSourceAddressOperand()) = valueNumber
+    or
+    isAddress = false and
+    tvalueNumber(instr.getSourceValueOperand().getAnyDef()) = valueNumber
+  )
 }
 
 private predicate loadTotalOverlapValueNumber(
   LoadTotalOverlapInstruction instr, IRFunction irFunc, IRType type, TValueNumber memOperand,
   TValueNumber operand
 ) {
-  instr.getEnclosingIRFunction() = irFunc and
-  tvalueNumber(instr.getAnOperand().(MemoryOperand).getAnyDef()) = memOperand and
-  tvalueNumberOfOperand(instr.getAnOperand().(AddressOperand)) = operand and
-  instr.getResultIRType() = type
+  loadTotalOverlapValueNumber0(instr, irFunc, type, operand, true) and
+  loadTotalOverlapValueNumber0(instr, irFunc, type, memOperand, false)
 }
 
 /**

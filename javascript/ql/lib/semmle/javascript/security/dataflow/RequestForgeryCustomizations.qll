@@ -9,7 +9,15 @@ module RequestForgery {
   /**
    * A data flow source for request forgery.
    */
-  abstract class Source extends DataFlow::Node { }
+  abstract class Source extends DataFlow::Node {
+    /**
+     * Holds if this source is relevant for server-side request forgery (SSRF).
+     *
+     * Otherwise, it is considered to be a source for client-side request forgery, which is
+     * considered less severe than the server-side variant.
+     */
+    predicate isServerSide() { any() }
+  }
 
   /**
    * A data flow sink for request forgery.
@@ -31,15 +39,20 @@ module RequestForgery {
    */
   abstract class Sanitizer extends DataFlow::Node { }
 
-  /** A source of remote user input, considered as a flow source for request forgery. */
-  private class RemoteFlowSourceAsSource extends Source {
-    RemoteFlowSourceAsSource() {
-      // Reduce FPs by excluding sources from client-side path or URL
-      exists(RemoteFlowSource src |
-        this = src and
-        not src.(ClientSideRemoteFlowSource).getKind().isPathOrUrl()
-      )
+  /**
+   * DEPRECATED: Use `ActiveThreatModelSource` from Concepts instead!
+   */
+  deprecated class RemoteFlowSourceAsSource = ActiveThreatModelSourceAsSource;
+
+  /**
+   * An active threat-model source, considered as a flow source.
+   */
+  private class ActiveThreatModelSourceAsSource extends Source instanceof ActiveThreatModelSource {
+    ActiveThreatModelSourceAsSource() {
+      not this.(ClientSideRemoteFlowSource).getKind().isPathOrUrl()
     }
+
+    override predicate isServerSide() { not super.isClientSideSource() }
   }
 
   /**
@@ -68,5 +81,28 @@ module RequestForgery {
       succ = url and
       pred = url.getArgument(0)
     )
+    or
+    exists(HtmlSanitizerCall call |
+      pred = call.getInput() and
+      succ = call
+    )
   }
+
+  private class SinkFromModel extends Sink {
+    SinkFromModel() { this = ModelOutput::getASinkNode("request-forgery").asSink() }
+
+    override DataFlow::Node getARequest() { result = this }
+
+    override string getKind() { result = "endpoint" }
+  }
+
+  private import Xss as Xss
+
+  /**
+   * A call to `encodeURI` or `encodeURIComponent`, viewed as a sanitizer for request forgery.
+   * These calls will escape "/" to "%2F", which is not a problem for request forgery.
+   * The result from calling `encodeURI` or `encodeURIComponent` is not a valid URL, and only makes sense
+   * as a part of a URL.
+   */
+  class UriEncodingSanitizer extends Sanitizer instanceof Xss::Shared::UriEncodingSanitizer { }
 }

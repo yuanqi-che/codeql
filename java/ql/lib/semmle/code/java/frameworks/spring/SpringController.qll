@@ -154,8 +154,11 @@ class SpringRequestMappingMethod extends SpringControllerMethod {
   }
 
   /** Gets the "value" @RequestMapping annotation value, if present. */
-  string getValue() {
-    result = requestMappingAnnotation.getValue("value").(CompileTimeConstantExpr).getStringValue()
+  string getValue() { result = requestMappingAnnotation.getStringValue("value") }
+
+  /** Gets the "method" @RequestMapping annotation value, if present. */
+  string getMethodValue() {
+    result = requestMappingAnnotation.getAnEnumConstantArrayValue("method").getName()
   }
 
   /** Holds if this is considered an `@ResponseBody` method. */
@@ -239,7 +242,7 @@ class SpringRequestMappingParameter extends Parameter {
 
   private predicate isExplicitlyTaintedInput() {
     // InputStream or Reader parameters allow access to the body of a request
-    this.getType().(RefType).getAnAncestor().hasQualifiedName("java.io", "InputStream") or
+    this.getType().(RefType).getAnAncestor() instanceof TypeInputStream or
     this.getType().(RefType).getAnAncestor().hasQualifiedName("java.io", "Reader") or
     // The SpringServletInputAnnotations allow access to the URI, request parameters, cookie values and the body of the request
     this.getAnAnnotation() instanceof SpringServletInputAnnotation or
@@ -309,7 +312,7 @@ class SpringModelPlainMap extends SpringModel {
   SpringModelPlainMap() { this.getType() instanceof MapType }
 
   override RefType getATypeInModel() {
-    exists(MethodAccess methodCall |
+    exists(MethodCall methodCall |
       methodCall.getQualifier() = this.getAnAccess() and
       methodCall.getCallee().hasName("put")
     |
@@ -329,7 +332,7 @@ class SpringModelModel extends SpringModel {
   }
 
   override RefType getATypeInModel() {
-    exists(MethodAccess methodCall |
+    exists(MethodCall methodCall |
       methodCall.getQualifier() = this.getAnAccess() and
       methodCall.getCallee().hasName("addAttribute")
     |

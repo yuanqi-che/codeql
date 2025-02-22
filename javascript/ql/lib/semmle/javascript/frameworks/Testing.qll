@@ -3,7 +3,6 @@
  */
 
 import javascript
-import semmle.javascript.frameworks.xUnit
 import semmle.javascript.frameworks.TestingCustomizations
 
 /**
@@ -28,8 +27,8 @@ class QUnitTest extends Test, @call_expr {
  * that is, an invocation of a function named `it` where the first argument
  * is a string and the second argument is a function.
  */
-class BDDTest extends Test, @call_expr {
-  BDDTest() {
+class BddTest extends Test, @call_expr {
+  BddTest() {
     exists(CallExpr call | call = this |
       call.getCallee().(VarAccess).getName() = "it" and
       exists(call.getArgument(0).getStringValue()) and
@@ -39,12 +38,14 @@ class BDDTest extends Test, @call_expr {
 }
 
 /**
- * Gets the test file for `f` with stem extension `stemExt`.
- * That is, a file named file named `<base>.<stemExt>.<ext>` in the
+ * Gets the test file for `f` with stem extension `stemExt`, where `stemExt` is "test" or "spec".
+ * That is, a file named `<base>.<stemExt>.<ext>` in the
  * same directory as `f` which is named `<base>.<ext>`.
  */
-bindingset[stemExt]
+pragma[noinline]
 File getTestFile(File f, string stemExt) {
+  stemExt = ["test", "spec"] and
+  result.getBaseName().regexpMatch(".*\\.(test|spec)\\..*") and
   result = f.getParentContainer().getFile(f.getStem() + "." + stemExt + "." + f.getExtension())
 }
 
@@ -62,7 +63,7 @@ class JestTest extends Test, @call_expr {
       exists(call.getArgument(0).getStringValue()) and
       exists(call.getArgument(1).flow().getAFunctionValue(0))
     ) and
-    getFile() = getTestFile(any(File f), "test")
+    this.getFile() = getTestFile(any(File f), "test")
   }
 }
 

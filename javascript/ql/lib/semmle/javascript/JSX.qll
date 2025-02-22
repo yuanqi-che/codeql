@@ -15,19 +15,19 @@ import javascript
  * <><h1>Title</h1>Some <b>text</b></>
  * ```
  */
-class JSXNode extends Expr, @jsx_element {
+class JsxNode extends Expr, @jsx_element {
   /** Gets the `i`th element in the body of this element or fragment. */
-  Expr getBodyElement(int i) { i >= 0 and result = getChildExpr(-i - 2) }
+  Expr getBodyElement(int i) { i >= 0 and result = this.getChildExpr(-i - 2) }
 
   /** Gets an element in the body of this element or fragment. */
-  Expr getABodyElement() { result = getBodyElement(_) }
+  Expr getABodyElement() { result = this.getBodyElement(_) }
 
   /**
    * Gets the parent JSX element or fragment of this element.
    */
-  JSXNode getJsxParent() { this = result.getABodyElement() }
+  JsxNode getJsxParent() { this = result.getABodyElement() }
 
-  override string getAPrimaryQlClass() { result = "JSXNode" }
+  override string getAPrimaryQlClass() { result = "JsxNode" }
 }
 
 /**
@@ -40,37 +40,39 @@ class JSXNode extends Expr, @jsx_element {
  * <Welcome name={user.name}/>
  * ```
  */
-class JSXElement extends JSXNode {
-  JSXName name;
+class JsxElement extends JsxNode {
+  JsxName name;
 
-  JSXElement() { name = getChildExpr(-1) }
+  JsxElement() { name = this.getChildExpr(-1) }
 
   /** Gets the expression denoting the name of this element. */
-  JSXName getNameExpr() { result = name }
+  JsxName getNameExpr() { result = name }
 
   /** Gets the name of this element. */
   string getName() { result = name.getValue() }
 
   /** Gets the `i`th attribute of this element. */
-  JSXAttribute getAttribute(int i) { properties(result, this, i, _, _) }
+  JsxAttribute getAttribute(int i) { properties(result, this, i, _, _) }
 
   /** Gets an attribute of this element. */
-  JSXAttribute getAnAttribute() { result = getAttribute(_) }
+  JsxAttribute getAnAttribute() { result = this.getAttribute(_) }
 
   /** Gets the attribute of this element with the given name, if any. */
-  JSXAttribute getAttributeByName(string n) { result = getAnAttribute() and result.getName() = n }
-
-  override ControlFlowNode getFirstControlFlowNode() {
-    result = getNameExpr().getFirstControlFlowNode()
+  JsxAttribute getAttributeByName(string n) {
+    result = this.getAnAttribute() and result.getName() = n
   }
 
-  override string getAPrimaryQlClass() { result = "JSXElement" }
+  override ControlFlowNode getFirstControlFlowNode() {
+    result = this.getNameExpr().getFirstControlFlowNode()
+  }
+
+  override string getAPrimaryQlClass() { result = "JsxElement" }
 
   /**
-   * Holds if this JSX element is a HTML element.
+   * Holds if this JSX element is an HTML element.
    * That is, the name starts with a lowercase letter.
    */
-  predicate isHTMLElement() { getName().regexpMatch("[a-z].*") }
+  predicate isHtmlElement() { this.getName().regexpMatch("[a-z].*") }
 }
 
 /**
@@ -82,16 +84,16 @@ class JSXElement extends JSXNode {
  * <><h1>Title</h1>Some <b>text</b></>
  * ```
  */
-class JSXFragment extends JSXNode {
-  JSXFragment() { not exists(getChildExpr(-1)) }
+class JsxFragment extends JsxNode {
+  JsxFragment() { not exists(this.getChildExpr(-1)) }
 
   override ControlFlowNode getFirstControlFlowNode() {
-    result = getBodyElement(0).getFirstControlFlowNode()
+    result = this.getBodyElement(0).getFirstControlFlowNode()
     or
-    not exists(getABodyElement()) and result = this
+    not exists(this.getABodyElement()) and result = this
   }
 
-  override string getAPrimaryQlClass() { result = "JSXFragment" }
+  override string getAPrimaryQlClass() { result = "JsxFragment" }
 }
 
 /**
@@ -105,39 +107,39 @@ class JSXFragment extends JSXNode {
  * <div {...attrs}></div>            // `{...attrs}` is a (spread) attribute
  * ```
  */
-class JSXAttribute extends ASTNode, @jsx_attribute {
+class JsxAttribute extends AstNode, @jsx_attribute {
   /**
    * Gets the expression denoting the name of this attribute.
    *
    * This is not defined for spread attributes.
    */
-  JSXName getNameExpr() { result = getChildExpr(0) }
+  JsxName getNameExpr() { result = this.getChildExpr(0) }
 
   /**
    * Gets the name of this attribute.
    *
    * This is not defined for spread attributes.
    */
-  string getName() { result = getNameExpr().getValue() }
+  string getName() { result = this.getNameExpr().getValue() }
 
   /** Gets the expression denoting the value of this attribute. */
-  Expr getValue() { result = getChildExpr(1) }
+  Expr getValue() { result = this.getChildExpr(1) }
 
   /** Gets the value of this attribute as a constant string, if possible. */
-  string getStringValue() { result = getValue().getStringValue() }
+  string getStringValue() { result = this.getValue().getStringValue() }
 
   /** Gets the JSX element to which this attribute belongs. */
-  JSXElement getElement() { this = result.getAnAttribute() }
+  JsxElement getElement() { this = result.getAnAttribute() }
 
   override ControlFlowNode getFirstControlFlowNode() {
-    result = getNameExpr().getFirstControlFlowNode()
+    result = this.getNameExpr().getFirstControlFlowNode()
     or
-    not exists(getNameExpr()) and result = getValue().getFirstControlFlowNode()
+    not exists(this.getNameExpr()) and result = this.getValue().getFirstControlFlowNode()
   }
 
   override string toString() { properties(this, _, _, _, result) }
 
-  override string getAPrimaryQlClass() { result = "JSXAttribute" }
+  override string getAPrimaryQlClass() { result = "JsxAttribute" }
 }
 
 /**
@@ -149,8 +151,8 @@ class JSXAttribute extends ASTNode, @jsx_attribute {
  * <div {...attrs}></div>            // `{...attrs}` is a spread attribute
  * ```
  */
-class JSXSpreadAttribute extends JSXAttribute {
-  JSXSpreadAttribute() { not exists(getNameExpr()) }
+class JsxSpreadAttribute extends JsxAttribute {
+  JsxSpreadAttribute() { not exists(this.getNameExpr()) }
 
   override SpreadElement getValue() {
     // override for more precise result type
@@ -167,18 +169,18 @@ class JSXSpreadAttribute extends JSXAttribute {
  * html:href
  * ```
  */
-class JSXQualifiedName extends Expr, @jsx_qualified_name {
+class JsxQualifiedName extends Expr, @jsx_qualified_name {
   /** Gets the namespace component of this qualified name. */
-  Identifier getNamespace() { result = getChildExpr(0) }
+  Identifier getNamespace() { result = this.getChildExpr(0) }
 
   /** Gets the name component of this qualified name. */
-  Identifier getName() { result = getChildExpr(1) }
+  Identifier getName() { result = this.getChildExpr(1) }
 
   override ControlFlowNode getFirstControlFlowNode() {
-    result = getNamespace().getFirstControlFlowNode()
+    result = this.getNamespace().getFirstControlFlowNode()
   }
 
-  override string getAPrimaryQlClass() { result = "JSXQualifiedName" }
+  override string getAPrimaryQlClass() { result = "JsxQualifiedName" }
 }
 
 /**
@@ -194,12 +196,12 @@ class JSXQualifiedName extends Expr, @jsx_qualified_name {
  * data.path
  * ```
  */
-class JSXName extends Expr {
-  JSXName() {
+class JsxName extends Expr {
+  JsxName() {
     this instanceof Identifier or
     this instanceof ThisExpr or
-    this.(DotExpr).getBase() instanceof JSXName or
-    this instanceof JSXQualifiedName
+    this.(DotExpr).getBase() instanceof JsxName or
+    this instanceof JsxQualifiedName
   }
 
   /**
@@ -209,10 +211,10 @@ class JSXName extends Expr {
     result = this.(Identifier).getName()
     or
     exists(DotExpr dot | dot = this |
-      result = dot.getBase().(JSXName).getValue() + "." + dot.getPropertyName()
+      result = dot.getBase().(JsxName).getValue() + "." + dot.getPropertyName()
     )
     or
-    exists(JSXQualifiedName qual | qual = this |
+    exists(JsxQualifiedName qual | qual = this |
       result = qual.getNamespace().getName() + ":" + qual.getName().getName()
     )
     or
@@ -230,8 +232,8 @@ class JSXName extends Expr {
  * { /* TBD *&#47; }
  * </pre>
  */
-class JSXEmptyExpr extends Expr, @jsx_empty_expr {
-  override string getAPrimaryQlClass() { result = "JSXEmptyExpr" }
+class JsxEmptyExpr extends Expr, @jsx_empty_expr {
+  override string getAPrimaryQlClass() { result = "JsxEmptyExpr" }
 }
 
 /**
@@ -243,12 +245,12 @@ class JSXEmptyExpr extends Expr, @jsx_empty_expr {
  * @jsx React.DOM
  * ```
  */
-class JSXPragma extends JSDocTag {
-  JSXPragma() { getTitle() = "jsx" }
+class JsxPragma extends JSDocTag {
+  JsxPragma() { this.getTitle() = "jsx" }
 
   /**
    * Gets the DOM name specified by the pragma; for `@jsx React.DOM`,
    * the result is `React.DOM`.
    */
-  string getDOMName() { result = getDescription().trim() }
+  string getDomName() { result = this.getDescription().trim() }
 }

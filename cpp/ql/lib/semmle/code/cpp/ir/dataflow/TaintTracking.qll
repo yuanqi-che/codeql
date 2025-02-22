@@ -16,14 +16,11 @@
  */
 
 import semmle.code.cpp.ir.dataflow.DataFlow
-import semmle.code.cpp.ir.dataflow.DataFlow2
 
 module TaintTracking {
-  import semmle.code.cpp.ir.dataflow.internal.tainttracking1.TaintTrackingImpl
-  private import semmle.code.cpp.ir.dataflow.TaintTracking2
-
-  /**
-   * DEPRECATED: Use TaintTracking2::Configuration instead.
-   */
-  deprecated class Configuration2 = TaintTracking2::Configuration;
+  import semmle.code.cpp.ir.dataflow.internal.TaintTrackingUtil
+  private import semmle.code.cpp.ir.dataflow.internal.DataFlowImplSpecific
+  private import semmle.code.cpp.ir.dataflow.internal.TaintTrackingImplSpecific
+  private import codeql.dataflow.TaintTracking
+  import TaintFlowMake<Location, CppDataFlow, CppTaintTracking>
 }

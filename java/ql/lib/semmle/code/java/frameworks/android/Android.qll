@@ -3,20 +3,27 @@
  */
 
 import java
-import semmle.code.java.dataflow.ExternalFlow
-import semmle.code.xml.AndroidManifest
+private import semmle.code.xml.AndroidManifest
 
 /**
- * Gets a transitive superType avoiding magic optimisation
+ * Holds if in `file`'s directory or some parent directory there is an `AndroidManifestXmlFile`
+ * that defines at least one activity, service or contest provider, suggesting this file is
+ * part of an android application.
  */
-pragma[nomagic]
-private RefType getASuperTypePlus(RefType t) { result = t.getASupertype+() }
+predicate inAndroidApplication(File file) {
+  file.isSourceFile() and
+  exists(AndroidManifestXmlFile amxf, Folder amxfDir |
+    amxf.definesAndroidApplication() and amxfDir = amxf.getParentContainer()
+  |
+    file.getParentContainer+() = amxfDir
+  )
+}
 
 /**
- * Gets a reflexive/transitive superType avoiding magic optimisation
+ * Gets a reflexive/transitive superType
  */
 pragma[inline]
-private RefType getASuperTypeStar(RefType t) { result = getASuperTypePlus(t) or result = t }
+private RefType getASuperTypeStar(RefType t) { hasDescendant(result, t) }
 
 /**
  * An Android component. That is, either an activity, a service,
@@ -33,7 +40,12 @@ class AndroidComponent extends Class {
 
   /** The XML element corresponding to this Android component. */
   AndroidComponentXmlElement getAndroidComponentXmlElement() {
-    result.getResolvedComponentName() = this.getQualifiedName()
+    // Find an element with an identifier matching the qualified name of the component.
+    // Aliases have two identifiers (name and target), so check both identifiers (if present).
+    exists(AndroidIdentifierXmlAttribute identifier |
+      identifier = result.getAnAttribute() and
+      result.getResolvedIdentifier(identifier) = this.getQualifiedName()
+    )
   }
 
   /** Holds if this Android component is configured as `exported` in an `AndroidManifest.xml` file. */
@@ -59,12 +71,26 @@ class ExportableAndroidComponent extends AndroidComponent {
     or
     this.hasIntentFilter() and
     not this.getAndroidComponentXmlElement().isNotExported()
+    or
+    exists(AndroidActivityAliasXmlElement e |
+      e = this.getAndroidComponentXmlElement() and
+      not e.isNotExported() and
+      e.hasAnIntentFilterElement()
+    )
   }
 }
 
 /** An Android activity. */
 class AndroidActivity extends ExportableAndroidComponent {
   AndroidActivity() { getASuperTypeStar(this).hasQualifiedName("android.app", "Activity") }
+}
+
+/** The method `setResult` of the class `android.app.Activity`. */
+class ActivitySetResultMethod extends Method {
+  ActivitySetResultMethod() {
+    this.getDeclaringType().hasQualifiedName("android.app", "Activity") and
+    this.hasName("setResult")
+  }
 }
 
 /** An Android service. */
@@ -101,110 +127,6 @@ class AndroidContentResolver extends AndroidComponent {
   }
 }
 
-private class UriModel extends SummaryModelCsv {
-  override predicate row(string row) {
-    row =
-      [
-        "android.net;Uri;true;buildUpon;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;false;decode;;;Argument[0];ReturnValue;taint",
-        "android.net;Uri;false;encode;;;Argument[0];ReturnValue;taint",
-        "android.net;Uri;false;fromFile;;;Argument[0];ReturnValue;taint",
-        "android.net;Uri;false;fromParts;;;Argument[0..2];ReturnValue;taint",
-        "android.net;Uri;true;getAuthority;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getEncodedAuthority;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getEncodedFragment;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getEncodedPath;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getEncodedQuery;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getEncodedSchemeSpecificPart;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getEncodedUserInfo;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getFragment;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getHost;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getLastPathSegment;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getPath;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getPathSegments;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getQuery;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getQueryParameter;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getQueryParameterNames;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getQueryParameters;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getScheme;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getSchemeSpecificPart;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;getUserInfo;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;true;normalizeScheme;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;false;parse;;;Argument[0];ReturnValue;taint",
-        "android.net;Uri;true;toString;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri;false;withAppendedPath;;;Argument[0..1];ReturnValue;taint",
-        "android.net;Uri;false;writeToParcel;;;Argument[1];Argument[0];taint",
-        "android.net;Uri$Builder;false;appendEncodedPath;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;appendEncodedPath;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;appendPath;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;appendPath;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;appendQueryParameter;;;Argument[0..1];Argument[-1];taint",
-        "android.net;Uri$Builder;false;appendQueryParameter;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;authority;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;authority;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;build;;;Argument[-1];ReturnValue;taint",
-        "android.net;Uri$Builder;false;clearQuery;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;encodedAuthority;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;encodedAuthority;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;encodedFragment;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;encodedFragment;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;encodedOpaquePart;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;encodedOpaquePart;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;encodedPath;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;encodedPath;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;encodedQuery;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;encodedQuery;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;fragment;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;fragment;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;opaquePart;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;opaquePart;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;path;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;path;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;query;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;query;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;scheme;;;Argument[0];Argument[-1];taint",
-        "android.net;Uri$Builder;false;scheme;;;Argument[-1];ReturnValue;value",
-        "android.net;Uri$Builder;false;toString;;;Argument[-1];ReturnValue;taint"
-      ]
-  }
-}
-
-private class ContentProviderSourceModels extends SourceModelCsv {
-  override predicate row(string row) {
-    row =
-      [
-        // ContentInterface models are here for backwards compatibility (it was removed in API 28)
-        "android.content;ContentInterface;true;call;(String,String,String,Bundle);;Parameter[0..3];contentprovider",
-        "android.content;ContentProvider;true;call;(String,String,String,Bundle);;Parameter[0..3];contentprovider",
-        "android.content;ContentProvider;true;call;(String,String,Bundle);;Parameter[0..2];contentprovider",
-        "android.content;ContentProvider;true;delete;(Uri,String,String[]);;Parameter[0..2];contentprovider",
-        "android.content;ContentInterface;true;delete;(Uri,Bundle);;Parameter[0..1];contentprovider",
-        "android.content;ContentProvider;true;delete;(Uri,Bundle);;Parameter[0..1];contentprovider",
-        "android.content;ContentInterface;true;getType;(Uri);;Parameter[0];contentprovider",
-        "android.content;ContentProvider;true;getType;(Uri);;Parameter[0];contentprovider",
-        "android.content;ContentInterface;true;insert;(Uri,ContentValues,Bundle);;Parameter[0];contentprovider",
-        "android.content;ContentProvider;true;insert;(Uri,ContentValues,Bundle);;Parameter[0..2];contentprovider",
-        "android.content;ContentProvider;true;insert;(Uri,ContentValues);;Parameter[0..1];contentprovider",
-        "android.content;ContentInterface;true;openAssetFile;(Uri,String,CancellationSignal);;Parameter[0];contentprovider",
-        "android.content;ContentProvider;true;openAssetFile;(Uri,String,CancellationSignal);;Parameter[0];contentprovider",
-        "android.content;ContentProvider;true;openAssetFile;(Uri,String);;Parameter[0];contentprovider",
-        "android.content;ContentInterface;true;openTypedAssetFile;(Uri,String,Bundle,CancellationSignal);;Parameter[0..2];contentprovider",
-        "android.content;ContentProvider;true;openTypedAssetFile;(Uri,String,Bundle,CancellationSignal);;Parameter[0..2];contentprovider",
-        "android.content;ContentProvider;true;openTypedAssetFile;(Uri,String,Bundle);;Parameter[0..2];contentprovider",
-        "android.content;ContentInterface;true;openFile;(Uri,String,CancellationSignal);;Parameter[0];contentprovider",
-        "android.content;ContentProvider;true;openFile;(Uri,String,CancellationSignal);;Parameter[0];contentprovider",
-        "android.content;ContentProvider;true;openFile;(Uri,String);;Parameter[0];contentprovider",
-        "android.content;ContentInterface;true;query;(Uri,String[],Bundle,CancellationSignal);;Parameter[0..2];contentprovider",
-        "android.content;ContentProvider;true;query;(Uri,String[],Bundle,CancellationSignal);;Parameter[0..2];contentprovider",
-        "android.content;ContentProvider;true;query;(Uri,String[],String,String[],String);;Parameter[0..4];contentprovider",
-        "android.content;ContentProvider;true;query;(Uri,String[],String,String[],String,CancellationSignal);;Parameter[0..4];contentprovider",
-        "android.content;ContentInterface;true;update;(Uri,ContentValues,Bundle);;Parameter[0..2];contentprovider",
-        "android.content;ContentProvider;true;update;(Uri,ContentValues,Bundle);;Parameter[0..2];contentprovider",
-        "android.content;ContentProvider;true;update;(Uri,ContentValues,String,String[]);;Parameter[0..3];contentprovider"
-      ]
-  }
-}
-
 /** Interface for classes whose instances can be written to and restored from a Parcel. */
 class TypeParcelable extends Interface {
   TypeParcelable() { this.hasQualifiedName("android.os", "Parcelable") }
@@ -216,32 +138,6 @@ class TypeParcelable extends Interface {
 class CreateFromParcelMethod extends Method {
   CreateFromParcelMethod() {
     this.hasName("createFromParcel") and
-    this.getEnclosingCallable().getDeclaringType().getASupertype*() instanceof TypeParcelable
-  }
-}
-
-private class ParcelPropagationModels extends SummaryModelCsv {
-  override predicate row(string s) {
-    // Parcel readers that return their value
-    s =
-      "android.os;Parcel;false;read" +
-        [
-          "Array", "ArrayList", "Boolean", "Bundle", "Byte", "Double", "FileDescriptor", "Float",
-          "HashMap", "Int", "Long", "Parcelable", "ParcelableArray", "PersistableBundle",
-          "Serializable", "Size", "SizeF", "SparseArray", "SparseBooleanArray", "String",
-          "StrongBinder", "TypedObject", "Value"
-        ] + ";;;Argument[-1];ReturnValue;taint"
-    or
-    // Parcel readers that write to an existing object
-    s =
-      "android.os;Parcel;false;read" +
-        [
-          "BinderArray", "BinderList", "BooleanArray", "ByteArray", "CharArray", "DoubleArray",
-          "FloatArray", "IntArray", "List", "LongArray", "Map", "ParcelableList", "StringArray",
-          "StringList", "TypedArray", "TypedList"
-        ] + ";;;Argument[-1];Argument[0];taint"
-    or
-    // One Parcel method that aliases an argument to a return value
-    s = "android.os;Parcel;false;readParcelableList;;;Argument[0];ReturnValue;value"
+    this.getEnclosingCallable().getDeclaringType().getAnAncestor() instanceof TypeParcelable
   }
 }

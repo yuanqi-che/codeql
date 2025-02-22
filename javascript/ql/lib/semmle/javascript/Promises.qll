@@ -1,12 +1,14 @@
 /**
- * Provides classes for modelling promises and their data-flow.
+ * Provides classes for modeling promises and their data-flow.
  */
 
 import javascript
 private import dataflow.internal.StepSummary
 
 /**
- * A definition of a `Promise` object.
+ * A call to the `Promise` constructor, such as `new Promise((resolve, reject) => { ... })`.
+ *
+ * This includes calls to the built-in `Promise` constructor as well as promise implementations from known libraries, such as `bluebird`.
  */
 abstract class PromiseDefinition extends DataFlow::SourceNode {
   /** Gets the executor function of this promise object. */
@@ -157,9 +159,7 @@ class ResolvedES2015PromiseDefinition extends ResolvedPromiseDefinition {
  */
 class AggregateES2015PromiseDefinition extends PromiseCreationCall {
   AggregateES2015PromiseDefinition() {
-    exists(string m | m = "all" or m = "race" or m = "any" or m = "allSettled" |
-      this = getAPromiseObject().getAMemberCall(m)
-    )
+    this = getAPromiseObject().getAMemberCall(["all", "race", "any", "allSettled"])
     or
     this = DataFlow::moduleImport("promise.allsettled").getACall()
   }
@@ -191,6 +191,15 @@ module Promises {
    * Gets the pseudo-field used to describe rejected values in a promise.
    */
   string errorProp() { result = "$PromiseRejectField$" }
+
+  /** A property set containing the pseudo-properites of a promise object. */
+  class PromiseProps extends DataFlow::PropertySet {
+    PromiseProps() { this = "PromiseProps" }
+
+    override string getAProperty() { result = [valueProp(), errorProp()] }
+  }
+
+  predicate promiseConstructorRef = getAPromiseObject/0;
 }
 
 /**
@@ -262,7 +271,7 @@ private import semmle.javascript.dataflow.internal.PreCallGraphStep
  * These steps are for `await p`, `new Promise()`, `Promise.resolve()`,
  * `Promise.then()`, `Promise.catch()`, and `Promise.finally()`.
  */
-private class PromiseStep extends PreCallGraphStep {
+private class PromiseStep extends LegacyPreCallGraphStep {
   override predicate loadStep(DataFlow::Node obj, DataFlow::Node element, string prop) {
     PromiseFlow::loadStep(obj, element, prop)
   }
@@ -273,6 +282,24 @@ private class PromiseStep extends PreCallGraphStep {
 
   override predicate loadStoreStep(DataFlow::Node pred, DataFlow::SourceNode succ, string prop) {
     PromiseFlow::loadStoreStep(pred, succ, prop)
+  }
+}
+
+/**
+ * A step from `p -> await p` for the case where `p` is not a promise.
+ *
+ * In this case, `await p` just returns `p` itself. We block flow of the promise-related
+ * pseudo properties through this edge.
+ */
+private class RawAwaitStep extends DataFlow::SharedTypeTrackingStep {
+  override predicate withoutPropStep(
+    DataFlow::Node pred, DataFlow::Node succ, DataFlow::PropertySet props
+  ) {
+    exists(AwaitExpr await |
+      pred = await.getOperand().flow() and
+      succ = await.flow() and
+      props instanceof Promises::PromiseProps
+    )
   }
 }
 
@@ -436,12 +463,7 @@ module PromiseFlow {
   }
 }
 
-/**
- * DEPRECATED. Use `TaintTracking::promiseStep` instead.
- */
-deprecated predicate promiseTaintStep = TaintTracking::promiseStep/2;
-
-private class PromiseTaintStep extends TaintTracking::SharedTaintStep {
+private class PromiseTaintStep extends TaintTracking::LegacyTaintStep {
   override predicate promiseStep(DataFlow::Node pred, DataFlow::Node succ) {
     // from `x` to `new Promise((res, rej) => res(x))`
     pred = succ.(PromiseDefinition).getResolveParameter().getACall().getArgument(0)
@@ -512,7 +534,7 @@ private module AsyncReturnSteps {
   /**
    * A data-flow step for ordinary and exceptional returns from async functions.
    */
-  private class AsyncReturn extends PreCallGraphStep {
+  private class AsyncReturn extends LegacyPreCallGraphStep {
     override predicate storeStep(DataFlow::Node pred, DataFlow::SourceNode succ, string prop) {
       exists(DataFlow::FunctionNode f | f.getFunction().isAsync() |
         // ordinary return
@@ -530,7 +552,7 @@ private module AsyncReturnSteps {
   /**
    * A data-flow step for ordinary return from an async function in a taint configuration.
    */
-  private class AsyncTaintReturn extends TaintTracking::SharedTaintStep {
+  private class AsyncTaintReturn extends TaintTracking::LegacyTaintStep {
     override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
       exists(Function f |
         f.isAsync() and
@@ -598,7 +620,8 @@ module Bluebird {
   }
 
   private class BluebirdCoroutineDefinitionAsPartialInvoke extends DataFlow::PartialInvokeNode::Range,
-    BluebirdCoroutineDefinition {
+    BluebirdCoroutineDefinition
+  {
     override DataFlow::SourceNode getBoundFunction(DataFlow::Node callback, int boundArgs) {
       boundArgs = 0 and
       callback = this.getArgument(0) and
@@ -646,7 +669,7 @@ private module ClosurePromise {
   /**
    * Taint steps through closure promise methods.
    */
-  private class ClosurePromiseTaintStep extends TaintTracking::SharedTaintStep {
+  private class ClosurePromiseTaintStep extends TaintTracking::LegacyTaintStep {
     override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
       // static methods in goog.Promise
       exists(DataFlow::CallNode call, string name |
@@ -654,10 +677,7 @@ private module ClosurePromise {
         succ = call and
         pred = call.getAnArgument()
       |
-        name = "all" or
-        name = "allSettled" or
-        name = "firstFulfilled" or
-        name = "race"
+        name = ["all", "allSettled", "firstFulfilled", "race"]
       )
       or
       // promise created through goog.promise.withResolver()
@@ -683,7 +703,7 @@ private module DynamicImportSteps {
    * let Foo = await import('./foo');
    * ```
    */
-  class DynamicImportStep extends PreCallGraphStep {
+  class DynamicImportStep extends LegacyPreCallGraphStep {
     override predicate storeStep(DataFlow::Node pred, DataFlow::SourceNode succ, string prop) {
       exists(DynamicImportExpr imprt |
         pred = imprt.getImportedModule().getAnExportedValue("default") and
@@ -712,7 +732,7 @@ private module DynamicImportSteps {
  */
 module Promisify {
   /**
-   * Gets a call to a `promisifyAll` function.
+   * A call to a `promisifyAll` function.
    * E.g. `require("bluebird").promisifyAll(...)`.
    */
   class PromisifyAllCall extends DataFlow::CallNode {
@@ -726,7 +746,7 @@ module Promisify {
   }
 
   /**
-   * Gets a call to a `promisify` function.
+   * A call to a `promisify` function.
    * E.g. `require("util").promisify(...)`.
    */
   class PromisifyCall extends DataFlow::CallNode {

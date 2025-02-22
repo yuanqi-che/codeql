@@ -1,9 +1,8 @@
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Semmle.Extraction.Entities;
-using Semmle.Util;
 using System.IO;
 using System.Linq;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Semmle.Util;
 
 namespace Semmle.Extraction.CSharp.Entities
 {
@@ -90,7 +89,11 @@ namespace Semmle.Extraction.CSharp.Entities
                     var tts = (TupleTypeSyntax)syntax;
                     var tt = (TupleType)type;
                     Emit(trapFile, loc ?? syntax.GetLocation(), parent, type);
-                    tts.Elements.Zip(tt.TupleElements, (s, t) => Create(Context, s.Type, this, t.Type)).Enumerate();
+                    foreach (var (s, t) in tts.Elements.Zip(tt.TupleElements, (s, t) => (s, t?.Type)))
+                    {
+                        if (t is not null)
+                            Create(Context, s.Type, this, t);
+                    }
                     return;
                 case SyntaxKind.GenericName:
                     Emit(trapFile, loc ?? syntax.GetLocation(), parent, type);

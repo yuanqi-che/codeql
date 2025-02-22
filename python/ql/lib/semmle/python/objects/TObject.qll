@@ -5,6 +5,7 @@ private import semmle.python.types.Builtins
 private import semmle.python.objects.ObjectInternal
 private import semmle.python.pointsto.PointsTo
 private import semmle.python.pointsto.PointsToContext
+private import semmle.python.internal.CachedStages
 
 /**
  * Internal type backing `ObjectInternal` and `Value`
@@ -83,7 +84,7 @@ newtype TObject =
   /** The unicode string `s` */
   TUnicode(string s) {
     // Any string explicitly mentioned in the source code.
-    exists(StrConst str |
+    exists(StringLiteral str |
       s = str.getText() and
       str.isUnicode()
     )
@@ -99,7 +100,7 @@ newtype TObject =
   /** The byte string `s` */
   TBytes(string s) {
     // Any string explicitly mentioned in the source code.
-    exists(StrConst str |
+    exists(StringLiteral str |
       s = str.getText() and
       not str.isUnicode()
     )
@@ -150,8 +151,10 @@ newtype TObject =
   TBuiltinTuple(Builtin bltn) { bltn.getClass() = Builtin::special("tuple") } or
   /** Represents a tuple in the Python source */
   TPythonTuple(TupleNode origin, PointsToContext context) {
-    origin.isLoad() and
-    context.appliesTo(origin)
+    exists(Scope s |
+      context.appliesToScope(s) and
+      scope_loads_tuplenode(s, origin)
+    )
   } or
   /** Varargs tuple */
   TVarargsTuple(CallNode call, PointsToContext context, int offset, int length) {
@@ -175,7 +178,7 @@ newtype TObject =
     not count(instantiation.getAnArg()) = 1 and
     Types::getMro(metacls).contains(TType())
   } or
-  /** Represents `sys.version_info`. Acts like a tuple with a range of values depending on the version being analysed. */
+  /** Represents `sys.version_info`. Acts like a tuple with a range of values depending on the version being analyzed. */
   TSysVersionInfo() or
   /** Represents a module that is inferred to perhaps exist, but is not present in the database. */
   TAbsentModule(string name) { missing_imported_module(_, _, name) } or
@@ -200,6 +203,13 @@ newtype TObject =
     index.isNotSubscriptedType() and
     Expressions::subscriptPartsPointsTo(_, _, generic, index)
   }
+
+/** Join-order helper for TPythonTuple */
+pragma[nomagic]
+private predicate scope_loads_tuplenode(Scope s, TupleNode origin) {
+  origin.isLoad() and
+  origin.getScope() = s
+}
 
 /** Holds if the object `t` is a type. */
 predicate isType(ObjectInternal t) {
@@ -233,7 +243,7 @@ predicate class_method(
  * Holds if the literal corresponding to the control flow node `n` has class `cls`.
  *
  * Helper predicate for `literal_instantiation`. Prevents a bad join with
- * `PointsToContext::appliesTo` from occuring.
+ * `PointsToContext::appliesTo` from occurring.
  */
 pragma[nomagic]
 private predicate literal_node_class(ControlFlowNode n, ClassObjectInternal cls) {
@@ -321,34 +331,6 @@ predicate call3(
   arg0 = call.getArg(0) and
   arg1 = call.getArg(1) and
   arg2 = call.getArg(2)
-}
-
-bindingset[self, function]
-predicate method_binding(
-  AttrNode instantiation, ObjectInternal self, CallableObjectInternal function,
-  PointsToContext context
-) {
-  exists(ObjectInternal obj, string name | receiver(instantiation, context, obj, name) |
-    exists(ObjectInternal cls |
-      cls = obj.getClass() and
-      cls != ObjectInternal::superType() and
-      cls.attribute(name, function, _) and
-      self = obj
-    )
-    or
-    exists(SuperInstance sup, ClassObjectInternal decl |
-      sup = obj and
-      decl = Types::getMro(self.getClass()).startingAt(sup.getStartClass()).findDeclaringClass(name) and
-      Types::declaredAttribute(decl, name, function, _) and
-      self = sup.getSelf()
-    )
-  )
-}
-
-/** Helper for method_binding */
-pragma[noinline]
-predicate receiver(AttrNode instantiation, PointsToContext context, ObjectInternal obj, string name) {
-  PointsToInternal::pointsTo(instantiation.getObject(name), context, obj, _)
 }
 
 /** Helper self parameters: `def meth(self, ...): ...`. */
@@ -444,7 +426,7 @@ predicate common_module_name(string name) { name = ["zope.interface", "six.moves
  * This acts as a helper for ClassObjectInternal allowing some lookup without
  * recursion.
  */
-library class ClassDecl extends @py_object {
+class ClassDecl extends @py_object {
   ClassDecl() {
     this.(Builtin).isClass() and not this = Builtin::unknownType()
     or

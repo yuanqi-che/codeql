@@ -2,6 +2,7 @@
 
 import csharp
 private import semmle.code.csharp.frameworks.System
+private import semmle.code.csharp.dataflow.FlowSummary
 
 /** The `System.Collections` namespace. */
 class SystemCollectionsNamespace extends Namespace {

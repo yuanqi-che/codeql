@@ -25,6 +25,7 @@ private import StmtContainers
 private import semmle.javascript.dataflow.internal.PreCallGraphStep
 private import semmle.javascript.dataflow.internal.FlowSteps
 private import semmle.javascript.dataflow.internal.AccessPaths
+private import semmle.javascript.dataflow.internal.TaintTrackingPrivate as TaintTrackingPrivate
 
 /**
  * Contains a `cached module` for each stage.
@@ -56,9 +57,9 @@ module Stages {
     predicate backref() {
       1 = 1
       or
-      exists(any(ASTNode a).getTopLevel())
+      exists(any(AstNode a).getTopLevel())
       or
-      exists(any(ASTNode a).getParent())
+      exists(any(AstNode a).getParent())
       or
       exists(any(StmtContainer c).getEnclosingContainer())
       or
@@ -68,7 +69,7 @@ module Stages {
       or
       exists(any(Expr e).getStringValue())
       or
-      any(ASTNode node).isAmbient()
+      any(AstNode node).isAmbient()
       or
       exists(any(Identifier e).getName())
       or
@@ -107,6 +108,30 @@ module Stages {
   }
 
   /**
+   * The part of data flow computed before flow summary nodes.
+   */
+  cached
+  module EarlyDataFlowStage {
+    /**
+     * Always holds.
+     * Ensures that a predicate is evaluated as part of the early DataFlow stage.
+     */
+    cached
+    predicate ref() { 1 = 1 }
+
+    /**
+     * DONT USE!
+     * Contains references to each predicate that use the above `ref` predicate.
+     */
+    cached
+    predicate backref() {
+      1 = 1
+      or
+      DataFlow::localFlowStep(_, _)
+    }
+  }
+
+  /**
    * The `dataflow` stage.
    */
   cached
@@ -128,15 +153,13 @@ module Stages {
       or
       exists(AmdModule a)
       or
-      DataFlow::localFlowStep(_, _)
-      or
       exists(any(DataFlow::SourceNode s).getAPropertyReference("foo"))
       or
       exists(any(Expr e).getExceptionTarget())
       or
       exists(DataFlow::ssaDefinitionNode(_))
       or
-      any(DataFlow::Node node).hasLocationInfo(_, _, _, _, _)
+      exists(any(DataFlow::Node node).getLocation())
       or
       exists(any(DataFlow::Node node).toString())
       or
@@ -145,6 +168,12 @@ module Stages {
       exists(any(DataFlow::PropRef ref).getBase())
       or
       exists(any(DataFlow::ClassNode cls))
+      or
+      exists(any(DataFlow::CallNode node).getArgument(_))
+      or
+      exists(any(DataFlow::CallNode node).getAnArgument())
+      or
+      exists(any(DataFlow::CallNode node).getLastArgument())
     }
   }
 
@@ -176,6 +205,8 @@ module Stages {
       exists(DataFlow::moduleImport(_))
       or
       exists(any(ReExportDeclaration d).getReExportedModule())
+      or
+      exists(any(Module m).getABulkExportedNode())
     }
   }
 
@@ -212,6 +243,8 @@ module Stages {
       any(DataFlow::Node node).hasUnderlyingType(_)
       or
       any(DataFlow::Node node).hasUnderlyingType(_, _)
+      or
+      AccessPath::DominatingPaths::hasDominatingWrite(_)
     }
   }
 
@@ -235,9 +268,9 @@ module Stages {
     predicate backref() {
       1 = 1
       or
-      AccessPath::DominatingPaths::hasDominatingWrite(_)
-      or
       DataFlow::SharedFlowStep::step(_, _)
+      or
+      exists(any(DataFlow::RegExpCreationNode e).getAReference())
     }
   }
 
@@ -245,7 +278,7 @@ module Stages {
    * The `APIStage` stage.
    */
   cached
-  module APIStage {
+  module ApiStage {
     /**
      * Always holds.
      * Ensures that a predicate is evaluated as part of the APIStage stage.
@@ -273,7 +306,11 @@ module Stages {
             .getUnknownMember()
             .getInstance()
             .getReceiver()
+            .getForwardingFunction()
             .getPromisedError()
+            .getADecoratedClass()
+            .getADecoratedMember()
+            .getADecoratedParameter()
       )
     }
   }
@@ -308,19 +345,7 @@ module Stages {
       or
       any(RegExpTerm t).isUsedAsRegExp()
       or
-      any(TaintTracking::AdditionalSanitizerGuardNode e).appliesTo(_)
-    }
-
-    cached
-    class DummySanitizer extends TaintTracking::AdditionalSanitizerGuardNode {
-      cached
-      DummySanitizer() { none() }
-
-      cached
-      override predicate appliesTo(TaintTracking::Configuration cfg) { none() }
-
-      cached
-      override predicate sanitizes(boolean outcome, Expr e) { none() }
+      TaintTrackingPrivate::defaultTaintSanitizer(_)
     }
   }
 }

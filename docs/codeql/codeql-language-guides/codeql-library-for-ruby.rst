@@ -1,4 +1,4 @@
-.. codeql-library-for-ruby:
+.. _codeql-library-for-ruby:
 
 CodeQL library for Ruby
 =======================
@@ -18,7 +18,7 @@ library by beginning your query with:
 
 .. code-block:: ql
 
-   import ruby
+   import codeql.ruby.AST
 
 The CodeQL libraries model various aspects of Ruby code, depending on the type of query you want to write.
 For example the abstract syntax tree (AST) library is used for locating program elements, to match syntactic
@@ -73,7 +73,7 @@ The CodeQL examples in this article are only excerpts and are not meant to repre
 Abstract syntax
 ---------------
 
-The abstract syntax tree (AST) represents the elements of the source code organized into a tree. The `AST viewer <https://codeql.github.com/docs/codeql-for-visual-studio-code/exploring-the-structure-of-your-source-code/>`__
+The abstract syntax tree (AST) represents the elements of the source code organized into a tree. The `AST viewer <https://docs.github.com/en/code-security/codeql-for-vs-code/using-the-advanced-functionality-of-the-codeql-for-vs-code-extension/exploring-the-structure-of-your-source-code/>`__
 in Visual Studio Code shows the AST nodes, including the relevant CodeQL classes and predicates.
 
 All CodeQL AST classes inherit from the `AstNode` class, which provides the following member predicates
@@ -138,7 +138,7 @@ The following example lists all methods in the class `ApiController`:
 
 .. code-block:: ql
 
-   import ruby
+   import codeql.ruby.AST
 
    from ClassDeclaration m
    where m.getName() = "ApiController"
@@ -223,7 +223,7 @@ Example
 
 .. code-block:: ql
 
-   import ruby
+   import codeql.ruby.AST
 
    from Method m
    where m.getName() = "show"
@@ -274,7 +274,7 @@ The following example finds all literals that are returned by a `return` stateme
 
 .. code-block:: ql
 
-   import ruby
+   import codeql.ruby.AST
 
    from ReturnStmt return, Literal lit
    where lit.getParent() = return 
@@ -421,7 +421,7 @@ The following example finds "chained assignments" (of the form ``A=B=C``):
 
 .. code-block:: ql
 
-   import ruby
+   import codeql.ruby.AST
    
    from Assignment op
    where op.getRightOperand() instanceof Assignment
@@ -460,7 +460,7 @@ The following example finds all method calls to a method called `delete`.
 
 .. code-block:: ql
 
-   import ruby
+   import codeql.ruby.AST
 
    from MethodCall call
    where call.getMethodName() = "delete"
@@ -517,7 +517,7 @@ The following example finds `if`-expressions that are missing a `then` branch.
 
 .. code-block:: ql
    
-   import ruby
+   import codeql.ruby.AST
 
    from IfExpr expr
    where not exists(expr.getThen())
@@ -559,7 +559,7 @@ The following example finds all class variables in the class `StaticController`:
 
 .. code-block:: ql
 
-   import ruby
+   import codeql.ruby.AST
 
    from ClassDeclaration cd, ClassVariable v
    where
@@ -612,7 +612,7 @@ The following example finds writes to class variables in the class `StaticContro
 
 .. code-block:: ql
 
-   import ruby
+   import codeql.ruby.AST
 
    from ClassVariableWriteAccess write, ClassDeclaration cd, ClassVariable v
    where

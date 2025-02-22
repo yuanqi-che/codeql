@@ -1,7 +1,6 @@
 /** Provides classes for modeling program variables. */
 
 private import codeql.ruby.AST
-private import codeql.Locations
 private import internal.AST
 private import internal.TreeSitter
 private import internal.Variable
@@ -35,7 +34,10 @@ class LocalVariable extends Variable, TLocalVariable {
   override LocalVariableAccess getAnAccess() { result.getVariable() = this }
 
   /** Gets the access where this local variable is first introduced. */
-  VariableAccess getDefiningAccess() { result = this.(LocalVariableReal).getDefiningAccessImpl() }
+  VariableAccess getDefiningAccess() {
+    result = this.(LocalVariableReal).getDefiningAccessImpl() or
+    synthChild(any(NamedParameter p | this = p.getVariable()), 0, result)
+  }
 
   /**
    * Holds if this variable is captured. For example in
@@ -61,7 +63,7 @@ class GlobalVariable extends Variable instanceof GlobalVariableImpl {
 
 /** An instance variable. */
 class InstanceVariable extends Variable instanceof InstanceVariableImpl {
-  /** Holds is this variable is a class instance variable. */
+  /** Holds if this variable is a class instance variable. */
   final predicate isClassInstanceVariable() { super.isClassInstanceVariable() }
 
   final override InstanceVariableAccess getAnAccess() { result.getVariable() = this }
@@ -114,10 +116,12 @@ class VariableAccess extends Expr instanceof VariableAccessImpl {
   predicate isImplicitWrite() {
     implicitWriteAccess(toGenerated(this))
     or
-    this = any(SimpleParameterSynthImpl p).getDefininingAccess()
+    this = any(SimpleParameterSynthImpl p).getDefiningAccess()
+    or
+    this = any(HashPattern p).getValue(_)
+    or
+    synthChild(any(NamedParameter p), 0, this)
   }
-
-  final override string toString() { result = VariableAccessImpl.super.toString() }
 }
 
 /** An access to a variable where the value is updated. */
@@ -175,6 +179,17 @@ class GlobalVariableReadAccess extends GlobalVariableAccess, VariableReadAccess 
 /** An access to an instance variable. */
 class InstanceVariableAccess extends VariableAccess instanceof InstanceVariableAccessImpl {
   final override string getAPrimaryQlClass() { result = "InstanceVariableAccess" }
+
+  /**
+   * Gets the synthetic receiver (`self`) of this instance variable access.
+   */
+  final SelfVariableAccess getReceiver() { synthChild(this, 0, result) }
+
+  final override AstNode getAChild(string pred) {
+    result = VariableAccess.super.getAChild(pred)
+    or
+    pred = "getReceiver" and result = this.getReceiver()
+  }
 }
 
 /** An access to an instance variable where the value is updated. */
@@ -194,7 +209,16 @@ class ClassVariableWriteAccess extends ClassVariableAccess, VariableWriteAccess 
 /** An access to a class variable where the value is read. */
 class ClassVariableReadAccess extends ClassVariableAccess, VariableReadAccess { }
 
-/** An access to the `self` variable */
+/**
+ * An access to the `self` variable. For example:
+ * - `self == other`
+ * - `self.method_name`
+ * - `def self.method_name ... end`
+ *
+ * This also includes implicit references to the current object in method
+ * calls.  For example, the method call `foo(123)` has an implicit `self`
+ * receiver, and is equivalent to the explicit `self.foo(123)`.
+ */
 class SelfVariableAccess extends LocalVariableAccess instanceof SelfVariableAccessImpl {
   final override string getAPrimaryQlClass() { result = "SelfVariableAccess" }
 }

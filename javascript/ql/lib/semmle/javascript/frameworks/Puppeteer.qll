@@ -5,16 +5,16 @@
 import javascript
 
 /**
- * Classes and predicates modelling the [puppeteer](https://www.npmjs.com/package/puppeteer) library.
+ * Classes and predicates modeling the [puppeteer](https://www.npmjs.com/package/puppeteer) library.
  */
 module Puppeteer {
   /**
-   * A reference to a module import of puppeteer.
+   * Gets a reference to a module import of puppeteer.
    */
   private API::Node puppeteer() { result = API::moduleImport(["puppeteer", "puppeteer-core"]) }
 
   /**
-   * A reference to a `Browser` from puppeteer.
+   * Gets a reference to a `Browser` from puppeteer.
    */
   private API::Node browser() {
     result = API::Node::ofType("puppeteer", "Browser")
@@ -25,7 +25,7 @@ module Puppeteer {
   }
 
   /**
-   * A reference to a `Page` from puppeteer.
+   * Gets a reference to a `Page` from puppeteer.
    */
   API::Node page() {
     result = API::Node::ofType("puppeteer", "Page")
@@ -38,7 +38,7 @@ module Puppeteer {
   }
 
   /**
-   * A reference to a `Target` from puppeteer.
+   * Gets a reference to a `Target` from puppeteer.
    */
   private API::Node target() {
     result = API::Node::ofType("puppeteer", "Target")
@@ -51,7 +51,7 @@ module Puppeteer {
   }
 
   /**
-   * A reference to a `BrowserContext` from puppeteer.
+   * Gets a reference to a `BrowserContext` from puppeteer.
    */
   private API::Node context() {
     result = API::Node::ofType("puppeteer", "BrowserContext")
@@ -71,7 +71,7 @@ module Puppeteer {
   private class PuppeteerGotoCall extends ClientRequest::Range, API::InvokeNode {
     PuppeteerGotoCall() { this = page().getMember("goto").getACall() }
 
-    override DataFlow::Node getUrl() { result = getArgument(0) }
+    override DataFlow::Node getUrl() { result = this.getArgument(0) }
 
     override DataFlow::Node getHost() { none() }
 
@@ -86,7 +86,7 @@ module Puppeteer {
       this = page().getMember(["addStyleTag", "addScriptTag"]).getACall()
     }
 
-    override DataFlow::Node getUrl() { result = getParameter(0).getMember("url").getARhs() }
+    override DataFlow::Node getUrl() { result = this.getParameter(0).getMember("url").asSink() }
 
     override DataFlow::Node getHost() { none() }
 

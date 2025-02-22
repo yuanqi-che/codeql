@@ -10,7 +10,7 @@ import semmle.code.java.frameworks.struts.StrutsActions
  */
 class Struts1ActionEntryPoint extends EntryPoint, Class {
   Struts1ActionEntryPoint() {
-    this.getASupertype*().hasQualifiedName("org.apache.struts.action", "Action")
+    this.getAnAncestor().hasQualifiedName("org.apache.struts.action", "Action")
   }
 
   override Callable getALiveCallable() {
@@ -22,7 +22,7 @@ class Struts1ActionEntryPoint extends EntryPoint, Class {
         result.(Method).overrides+(methodFromAction)
       )
       or
-      this.getASupertype*().hasQualifiedName("org.apache.struts.actions", "DispatchAction") and
+      this.getAnAncestor().hasQualifiedName("org.apache.struts.actions", "DispatchAction") and
       result.(Method).isPublic()
       or
       result.(Constructor).getNumberOfParameters() = 0
@@ -33,23 +33,18 @@ class Struts1ActionEntryPoint extends EntryPoint, Class {
 /**
  * A struts 2 action class that is reflectively constructed.
  */
-class Struts2ReflectivelyConstructedAction extends ReflectivelyConstructedClass {
-  Struts2ReflectivelyConstructedAction() { this instanceof Struts2ActionClass }
-}
+class Struts2ReflectivelyConstructedAction extends ReflectivelyConstructedClass instanceof Struts2ActionClass
+{ }
 
 /**
  * A method called on a struts 2 action class when the action is activated.
  */
-class Struts2ActionMethodEntryPoint extends CallableEntryPoint {
-  Struts2ActionMethodEntryPoint() { this instanceof Struts2ActionMethod }
-}
+class Struts2ActionMethodEntryPoint extends CallableEntryPoint instanceof Struts2ActionMethod { }
 
 /**
  * A method called on a struts 2 action class before an action is activated.
  */
-class Struts2PrepareMethodEntryPoint extends CallableEntryPoint {
-  Struts2PrepareMethodEntryPoint() { this instanceof Struts2PrepareMethod }
-}
+class Struts2PrepareMethodEntryPoint extends CallableEntryPoint instanceof Struts2PrepareMethod { }
 
 /**
  * A class which is accessible - directly or indirectly - from a struts action.

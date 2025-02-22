@@ -86,10 +86,10 @@ class MetricRefType extends RefType, MetricElement {
   }
 
   /** Any method declared in this type that accesses a field declared in this type. */
-  Method getAccessingMethod() { exists(Field f | this.accessesLocalField(result, f)) }
+  Method getAccessingMethod() { this.accessesLocalField(result, _) }
 
   /** Any field declared in this type that is accessed by a method declared in this type. */
-  Field getAccessedField() { exists(Method m | this.accessesLocalField(m, result)) }
+  Field getAccessedField() { this.accessesLocalField(_, result) }
 
   /**
    * Gets the Henderson-Sellers lack of cohesion metric.
@@ -234,13 +234,13 @@ class MetricRefType extends RefType, MetricElement {
     not this.cyclic() and result = this.getASupertype().(MetricRefType).getADepth(reference) + 1
   }
 
-  private predicate cyclic() { this.getASupertype+() = this }
+  private predicate cyclic() { this.getAStrictAncestor() = this }
 
   /** Gets the depth of inheritance metric relative to the specified reference type. */
   int getInheritanceDepth(RefType reference) { result = max(this.getADepth(reference)) }
 
   /** Gets the number of (direct or indirect) supertypes. */
-  int getNumberOfAncestors() { result = count(this.getASupertype+()) }
+  int getNumberOfAncestors() { result = count(this.getAStrictAncestor()) }
 
   /**
    * Gets the response for a type.

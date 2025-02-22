@@ -16,13 +16,6 @@
 
 import java
 
-class ReachFromStmt extends Stmt {
-  ReachFromStmt() {
-    exists(Method m | m.getBody() = this) or
-    exists(WhileStmt w | w.getStmt() = this)
-  }
-}
-
 class SleepMethod extends Method {
   SleepMethod() {
     this.getName() = "sleep" and
@@ -30,8 +23,8 @@ class SleepMethod extends Method {
   }
 }
 
-class SleepMethodAccess extends MethodAccess {
-  SleepMethodAccess() { this.getMethod() instanceof SleepMethod }
+class SleepMethodCall extends MethodCall {
+  SleepMethodCall() { this.getMethod() instanceof SleepMethod }
 }
 
 class WaitMethod extends Method {
@@ -55,7 +48,7 @@ class CommunicationMethod extends Method {
 predicate callsCommunicationMethod(Method source) {
   source instanceof CommunicationMethod
   or
-  exists(MethodAccess a, Method overridingMethod, Method target |
+  exists(MethodCall a, Method overridingMethod, Method target |
     callsCommunicationMethod(overridingMethod) and
     overridingMethod.overridesOrInstantiates*(target) and
     target = a.getMethod() and
@@ -64,13 +57,13 @@ predicate callsCommunicationMethod(Method source) {
 }
 
 class DangerStmt extends Stmt {
-  DangerStmt() { exists(SleepMethodAccess sleep | sleep.getEnclosingStmt() = this) }
+  DangerStmt() { exists(SleepMethodCall sleep | sleep.getEnclosingStmt() = this) }
 }
 
 from WhileStmt s, DangerStmt d
 where
   d.getEnclosingStmt+() = s and
-  not exists(MethodAccess call | callsCommunicationMethod(call.getMethod()) |
+  not exists(MethodCall call | callsCommunicationMethod(call.getMethod()) |
     call.getEnclosingStmt().getEnclosingStmt*() = s
   )
 select d, "Prefer wait/notify or java.util.concurrent to communicate between threads."

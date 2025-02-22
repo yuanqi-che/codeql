@@ -2,15 +2,70 @@ private import java
 private import DataFlowPrivate
 private import DataFlowUtil
 private import semmle.code.java.dataflow.InstanceAccess
-private import semmle.code.java.dataflow.FlowSummary
+private import semmle.code.java.dataflow.internal.FlowSummaryImpl as Impl
 private import semmle.code.java.dispatch.VirtualDispatch as VirtualDispatch
+private import semmle.code.java.dataflow.TypeFlow
+private import semmle.code.java.dispatch.internal.Unification
 
 private module DispatchImpl {
-  /** Gets a viable implementation of the target of the given `Call`. */
-  DataFlowCallable viableCallable(DataFlowCall c) {
-    result.asCallable() = VirtualDispatch::viableCallable(c.asCall())
+  private predicate hasHighConfidenceTarget(Call c) {
+    exists(Impl::Public::SummarizedCallable sc | sc.getACall() = c and not sc.applyGeneratedModel())
     or
-    result.(SummarizedCallable).asCallable() = c.asCall().getCallee().getSourceDeclaration()
+    exists(Impl::Public::NeutralSummaryCallable nc | nc.getACall() = c and nc.hasManualModel())
+    or
+    exists(Callable srcTgt |
+      srcTgt = VirtualDispatch::viableCallable(c) and
+      not VirtualDispatch::lowConfidenceDispatchTarget(c, srcTgt)
+    )
+  }
+
+  private predicate hasExactManualModel(Call c, Callable tgt) {
+    tgt = c.getCallee().getSourceDeclaration() and
+    (
+      exists(Impl::Public::SummarizedCallable sc |
+        sc.getACall() = c and sc.hasExactModel() and sc.hasManualModel()
+      )
+      or
+      exists(Impl::Public::NeutralSummaryCallable nc |
+        nc.getACall() = c and nc.hasExactModel() and nc.hasManualModel()
+      )
+    )
+  }
+
+  private Callable sourceDispatch(Call c) {
+    not hasExactManualModel(c, result) and
+    result = VirtualDispatch::viableCallable(c) and
+    if VirtualDispatch::lowConfidenceDispatchTarget(c, result)
+    then not hasHighConfidenceTarget(c)
+    else any()
+  }
+
+  /**
+   * Gets a viable implementation of the target of the given `Call`.
+   * The following heuristic is applied for finding the appropriate callable:
+   * In general, dispatch to both any existing model and any viable source dispatch.
+   * However, if the model is generated and the static call target is in the source then
+   * we trust the source more than the model and skip dispatch to the model.
+   * Vice versa, if the model is manual and the source dispatch has a comparatively low
+   * confidence then we only dispatch to the model. Additionally, manual models that
+   * match a source dispatch exactly take precedence over the source.
+   */
+  DataFlowCallable viableCallable(DataFlowCall c) {
+    exists(Call call | call = c.asCall() |
+      result.asCallable() = sourceDispatch(call)
+      or
+      not (
+        // Only use summarized callables with generated summaries in case
+        // the static call target is not in the source code.
+        // Note that if applyGeneratedModel holds it implies that there doesn't
+        // exist a manual model.
+        exists(Callable staticTarget | staticTarget = call.getCallee().getSourceDeclaration() |
+          staticTarget.fromSource() and not staticTarget.isStub()
+        ) and
+        result.asSummarizedCallable().applyGeneratedModel()
+      ) and
+      result.asSummarizedCallable().getACall() = call
+    )
   }
 
   /**
@@ -18,9 +73,9 @@ private module DispatchImpl {
    * might be improved by knowing the call context. This is the case if the
    * qualifier is the `i`th parameter of the enclosing callable `c`.
    */
-  private predicate mayBenefitFromCallContext(MethodAccess ma, Callable c, int i) {
+  private predicate mayBenefitFromCallContext(MethodCall ma, Callable c, int i) {
     exists(Parameter p |
-      2 <= strictcount(VirtualDispatch::viableImpl(ma)) and
+      2 <= strictcount(sourceDispatch(ma)) and
       ma.getQualifier().(VarAccess).getVariable() = p and
       p.getPosition() = i and
       c.getAParameter() = p and
@@ -29,7 +84,7 @@ private module DispatchImpl {
     )
     or
     exists(OwnInstanceAccess ia |
-      2 <= strictcount(VirtualDispatch::viableImpl(ma)) and
+      2 <= strictcount(sourceDispatch(ma)) and
       (ia.isExplicit(ma.getQualifier()) or ia.isImplicitMethodQualifier(ma)) and
       i = -1 and
       c = ma.getEnclosingCallable()
@@ -38,14 +93,14 @@ private module DispatchImpl {
 
   /**
    * Holds if the call `ctx` might act as a context that improves the set of
-   * dispatch targets of a `MethodAccess` that occurs in a viable target of
+   * dispatch targets of a `MethodCall` that occurs in a viable target of
    * `ctx`.
    */
   pragma[nomagic]
   private predicate relevantContext(Call ctx, int i) {
     exists(Callable c |
       mayBenefitFromCallContext(_, c, i) and
-      c = VirtualDispatch::viableCallable(ctx)
+      c = sourceDispatch(ctx)
     )
   }
 
@@ -62,15 +117,21 @@ private module DispatchImpl {
   private predicate contextArgHasType(Call ctx, int i, RefType t, boolean exact) {
     relevantContext(ctx, i) and
     exists(RefType srctype |
-      exists(Expr arg, Expr src |
+      exists(Expr arg |
         i = -1 and
         ctx.getQualifier() = arg
         or
         ctx.getArgument(i) = arg
       |
-        src = VirtualDispatch::variableTrack(arg) and
-        srctype = getPreciseType(src) and
-        if src instanceof ClassInstanceExpr then exact = true else exact = false
+        exprTypeFlow(arg, srctype, exact)
+        or
+        not exprTypeFlow(arg, _, _) and
+        exprUnionTypeFlow(arg, srctype, exact)
+        or
+        not exprTypeFlow(arg, _, _) and
+        not exprUnionTypeFlow(arg, _, _) and
+        srctype = getPreciseType(arg) and
+        if arg instanceof ClassInstanceExpr then exact = true else exact = false
       )
       or
       exists(Node arg |
@@ -90,10 +151,16 @@ private module DispatchImpl {
   /**
    * Holds if the set of viable implementations that can be called by `call`
    * might be improved by knowing the call context. This is the case if the
-   * qualifier is a parameter of the enclosing callable `c`.
+   * qualifier is a parameter of the enclosing callable of `call`.
    */
-  predicate mayBenefitFromCallContext(DataFlowCall call, DataFlowCallable c) {
-    mayBenefitFromCallContext(call.asCall(), c.asCallable(), _)
+  predicate mayBenefitFromCallContext(DataFlowCall call) {
+    mayBenefitFromCallContext(call.asCall(), _, _)
+  }
+
+  bindingset[call, tgt]
+  pragma[inline_late]
+  private predicate viableCallableFilter(DataFlowCall call, DataFlowCallable tgt) {
+    tgt = viableCallable(call)
   }
 
   /**
@@ -101,8 +168,8 @@ private module DispatchImpl {
    * restricted to those `call`s for which a context might make a difference.
    */
   DataFlowCallable viableImplInCallContext(DataFlowCall call, DataFlowCall ctx) {
-    result = viableCallable(call) and
-    exists(int i, Callable c, Method def, RefType t, boolean exact, MethodAccess ma |
+    viableCallableFilter(call, result) and
+    exists(int i, Callable c, Method def, RefType t, boolean exact, MethodCall ma |
       ma = call.asCall() and
       mayBenefitFromCallContext(ma, c, i) and
       c = viableCallable(ctx).asCallable() and
@@ -115,74 +182,20 @@ private module DispatchImpl {
       exact = false and
       exists(RefType t2 |
         result.asCallable() = VirtualDispatch::viableMethodImpl(def, t.getSourceDeclaration(), t2) and
-        not failsUnification(t, t2)
+        not Unification::failsUnification(t, t2)
       )
       or
-      result.asCallable() = def and result instanceof SummarizedCallable
+      result.asSummarizedCallable().getACall() = ma
     )
   }
 
-  pragma[noinline]
-  private predicate unificationTargetLeft(ParameterizedType t1, GenericType g) {
-    contextArgHasType(_, _, t1, _) and t1.getGenericType() = g
+  private predicate unificationTargetLeft(ParameterizedType t1) { contextArgHasType(_, _, t1, _) }
+
+  private predicate unificationTargetRight(ParameterizedType t2) {
+    exists(VirtualDispatch::viableMethodImpl(_, _, t2))
   }
 
-  pragma[noinline]
-  private predicate unificationTargetRight(ParameterizedType t2, GenericType g) {
-    exists(VirtualDispatch::viableMethodImpl(_, _, t2)) and t2.getGenericType() = g
-  }
-
-  private predicate unificationTargets(Type t1, Type t2) {
-    exists(GenericType g | unificationTargetLeft(t1, g) and unificationTargetRight(t2, g))
-    or
-    exists(Array a1, Array a2 |
-      unificationTargets(a1, a2) and
-      t1 = a1.getComponentType() and
-      t2 = a2.getComponentType()
-    )
-    or
-    exists(ParameterizedType pt1, ParameterizedType pt2, int pos |
-      unificationTargets(pt1, pt2) and
-      not pt1.getSourceDeclaration() != pt2.getSourceDeclaration() and
-      t1 = pt1.getTypeArgument(pos) and
-      t2 = pt2.getTypeArgument(pos)
-    )
-  }
-
-  pragma[noinline]
-  private predicate typeArgsOfUnificationTargets(
-    ParameterizedType t1, ParameterizedType t2, int pos, RefType arg1, RefType arg2
-  ) {
-    unificationTargets(t1, t2) and
-    arg1 = t1.getTypeArgument(pos) and
-    arg2 = t2.getTypeArgument(pos)
-  }
-
-  private predicate failsUnification(Type t1, Type t2) {
-    unificationTargets(t1, t2) and
-    (
-      exists(RefType arg1, RefType arg2 |
-        typeArgsOfUnificationTargets(t1, t2, _, arg1, arg2) and
-        failsUnification(arg1, arg2)
-      )
-      or
-      failsUnification(t1.(Array).getComponentType(), t2.(Array).getComponentType())
-      or
-      not (
-        t1 instanceof Array and t2 instanceof Array
-        or
-        t1.(PrimitiveType) = t2.(PrimitiveType)
-        or
-        t1.(Class).getSourceDeclaration() = t2.(Class).getSourceDeclaration()
-        or
-        t1.(Interface).getSourceDeclaration() = t2.(Interface).getSourceDeclaration()
-        or
-        t1 instanceof BoundedType and t2 instanceof RefType
-        or
-        t1 instanceof RefType and t2 instanceof BoundedType
-      )
-    )
-  }
+  private module Unification = MkUnification<unificationTargetLeft/1, unificationTargetRight/1>;
 
   private int parameterPosition() { result in [-1, any(Parameter p).getPosition()] }
 

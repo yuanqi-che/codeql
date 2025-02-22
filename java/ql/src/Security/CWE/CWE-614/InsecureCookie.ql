@@ -13,14 +13,10 @@
 
 import java
 import semmle.code.java.frameworks.Servlets
+import semmle.code.java.security.InsecureCookieQuery
 
-from MethodAccess add
+from MethodCall add
 where
   add.getMethod() instanceof ResponseAddCookieMethod and
-  not exists(Variable cookie, MethodAccess m |
-    add.getArgument(0) = cookie.getAnAccess() and
-    m.getMethod().getName() = "setSecure" and
-    m.getArgument(0).(BooleanLiteral).getBooleanValue() = true and
-    m.getQualifier() = cookie.getAnAccess()
-  )
+  not SecureCookieFlow::flowToExpr(add.getArgument(0))
 select add, "Cookie is added to response without the 'secure' flag being set."

@@ -56,7 +56,7 @@ module JsonSchema {
 
   /** Provides a model of the `ajv` library. */
   module Ajv {
-    /** A method on `Ajv` that returns `this`. */
+    /** Gets a method on `Ajv` that returns `this`. */
     private string chainedMethod() {
       result =
         ["addSchema", "addMetaSchema", "removeSchema", "addFormat", "addKeyword", "removeKeyword"]
@@ -134,14 +134,14 @@ module JsonSchema {
               .ref()
               .getMember(["addSchema", "validate", "compile", "compileAsync"])
               .getParameter(0)
-              .getARhs()
+              .asSink()
       }
     }
   }
 
   /** Provides a model for working with the [`joi`](https://npmjs.org/package/joi) library. */
   module Joi {
-    /** A schema created using `joi.object()` or other schemas that might refer an object schema. */
+    /** Gets a schema created using `joi.object()` or other schemas that might refer an object schema. */
     private API::Node objectSchema() {
       // A call that creates a schema that might be an object schema.
       result =
@@ -184,7 +184,7 @@ module JsonSchema {
       override boolean getPolarity() { none() }
 
       override DataFlow::Node getAValidationResultAccess(boolean polarity) {
-        result = this.getReturn().getMember("error").getAnImmediateUse() and
+        result = this.getReturn().getMember("error").asSource() and
         polarity = false
       }
     }

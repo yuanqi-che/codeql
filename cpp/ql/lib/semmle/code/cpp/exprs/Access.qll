@@ -84,8 +84,8 @@ class VariableAccess extends Access, @varaccess {
     exists(Assignment a | a.getLValue() = this) or
     exists(CrementOperation c | c.getOperand() = this) or
     exists(AddressOfExpr addof | addof.getOperand() = this) or
-    exists(ReferenceToExpr rte | this.getConversion() = rte) or
-    exists(ArrayToPointerConversion atpc | this.getConversion() = atpc)
+    this.getConversion() instanceof ReferenceToExpr or
+    this.getConversion() instanceof ArrayToPointerConversion
   }
 
   /**
@@ -104,8 +104,8 @@ class VariableAccess extends Access, @varaccess {
   predicate isRValue() {
     not exists(AssignExpr ae | ae.getLValue() = this) and
     not exists(AddressOfExpr addof | addof.getOperand() = this) and
-    not exists(ReferenceToExpr rte | this.getConversion() = rte) and
-    not exists(ArrayToPointerConversion atpc | this.getConversion() = atpc)
+    not this.getConversion() instanceof ReferenceToExpr and
+    not this.getConversion() instanceof ArrayToPointerConversion
   }
 
   /**
@@ -218,9 +218,7 @@ class PointerFieldAccess extends FieldAccess {
 class DotFieldAccess extends FieldAccess {
   override string getAPrimaryQlClass() { result = "DotFieldAccess" }
 
-  DotFieldAccess() {
-    exists(Class c | c = this.getQualifier().getFullyConverted().getUnspecifiedType())
-  }
+  DotFieldAccess() { this.getQualifier().getFullyConverted().getUnspecifiedType() instanceof Class }
 }
 
 /**
@@ -308,15 +306,13 @@ private predicate exprHasReferenceConversion(Expr e) { referenceConversion(e.get
  *   }
  * };
  * ```
- * Note: the C++ front-end often automatically desugars `field` to
- * `this->field`, so most accesses of `this->field` are instances
- * of `PointerFieldAccess` (with `ThisExpr` as the qualifier), not
- * `ImplicitThisFieldAccess`.
  */
 class ImplicitThisFieldAccess extends FieldAccess {
   override string getAPrimaryQlClass() { result = "ImplicitThisFieldAccess" }
 
-  ImplicitThisFieldAccess() { not exists(this.getQualifier()) }
+  ImplicitThisFieldAccess() {
+    this.getQualifier().(ThisExpr).isCompilerGenerated() or not exists(this.getQualifier())
+  }
 }
 
 /**
@@ -334,7 +330,7 @@ class PointerToFieldLiteral extends ImplicitThisFieldAccess {
     // access without a qualifier. The only other unqualified field accesses it
     // emits are for compiler-generated constructors and destructors. When we
     // filter those out, there are only pointer-to-field literals left.
-    not this.isCompilerGenerated()
+    not this.isCompilerGenerated() and not exists(this.getQualifier())
   }
 
   override predicate isConstant() { any() }
@@ -369,6 +365,11 @@ class FunctionAccess extends Access, @routineexpr {
 
   /** Gets the accessed function. */
   override Function getTarget() { funbind(underlyingElement(this), unresolveElement(result)) }
+
+  /**
+   * Gets the expression generating the function being accessed.
+   */
+  Expr getQualifier() { this.getChild(-1) = result }
 
   /** Gets a textual representation of this function access. */
   override string toString() {

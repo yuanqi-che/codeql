@@ -9,13 +9,12 @@ private import python
 private import semmle.python.dataflow.new.DataFlow
 private import semmle.python.Concepts
 private import semmle.python.ApiGraphs
+private import semmle.python.frameworks.PEP249
 
 /** Provides models for the `aiopg` PyPI package. */
 private module Aiopg {
-  private import semmle.python.internal.Awaited
-
   /**
-   * A `ConectionPool` is created when the result of `aiopg.create_pool()` is awaited.
+   * Gets a `ConnectionPool` that is created when the result of `aiopg.create_pool()` is awaited.
    * See https://aiopg.readthedocs.io/en/stable/core.html#pool
    */
   API::Node connectionPool() {
@@ -23,69 +22,33 @@ private module Aiopg {
   }
 
   /**
-   * A `Connection` is created when
+   * A Connection that is created when
    * - the result of `aiopg.connect()` is awaited.
-   * - the result of calling `aquire` on a `ConnectionPool` is awaited.
-   * See https://aiopg.readthedocs.io/en/stable/core.html#connection
+   * - the result of calling `acquire` on a `ConnectionPool` is awaited.
+   * See
+   * - https://aiopg.readthedocs.io/en/stable/core.html#connection
+   * - https://aiopg.readthedocs.io/en/stable/core.html#aiopg.Pool.acquire
    */
-  API::Node connection() {
-    result = API::moduleImport("aiopg").getMember("connect").getReturn().getAwaited()
-    or
-    result = connectionPool().getMember("acquire").getReturn().getAwaited()
+  class AiopgConnection extends PEP249::AsyncDatabaseConnection {
+    AiopgConnection() {
+      this = API::moduleImport("aiopg").getMember("connect").getReturn().getAwaited()
+      or
+      this = connectionPool().getMember("acquire").getReturn().getAwaited()
+    }
   }
 
   /**
-   * A `Cursor` is created when
+   * An additional cursor, that is created when
    * - the result of calling `cursor` on a `ConnectionPool` is awaited.
-   * - the result of calling `cursor` on a `Connection` is awaited.
-   * See https://aiopg.readthedocs.io/en/stable/core.html#cursor
+   * See
+   * - https://aiopg.readthedocs.io/en/stable/core.html#aiopg.Pool.cursor
    */
-  API::Node cursor() {
-    result = connectionPool().getMember("cursor").getReturn().getAwaited()
-    or
-    result = connection().getMember("cursor").getReturn().getAwaited()
+  class AiopgCursor extends PEP249::AsyncDatabaseCursor {
+    AiopgCursor() { this = connectionPool().getMember("cursor").getReturn().getAwaited() }
   }
 
   /**
-   * Calling `execute` on a `Cursor` constructs a query.
-   * See https://aiopg.readthedocs.io/en/stable/core.html#aiopg.Cursor.execute
-   */
-  class CursorExecuteCall extends SqlConstruction::Range, DataFlow::CallCfgNode {
-    CursorExecuteCall() { this = cursor().getMember("execute").getACall() }
-
-    override DataFlow::Node getSql() { result in [this.getArg(0), this.getArgByName("operation")] }
-  }
-
-  /**
-   * This is only needed to connect the argument to the execute call with the subsequnt awaiting.
-   * It should be obsolete once we have `API::CallNode` available.
-   */
-  private DataFlow::TypeTrackingNode cursorExecuteCall(DataFlow::TypeTracker t, DataFlow::Node sql) {
-    // cursor created from connection
-    t.start() and
-    sql = result.(CursorExecuteCall).getSql()
-    or
-    exists(DataFlow::TypeTracker t2 | result = cursorExecuteCall(t2, sql).track(t2, t))
-  }
-
-  DataFlow::Node cursorExecuteCall(DataFlow::Node sql) {
-    cursorExecuteCall(DataFlow::TypeTracker::end(), sql).flowsTo(result)
-  }
-
-  /**
-   * Awaiting the result of calling `execute` executes the query.
-   * See https://aiopg.readthedocs.io/en/stable/core.html#aiopg.Cursor.execute
-   */
-  class AwaitedCursorExecuteCall extends SqlExecution::Range {
-    DataFlow::Node sql;
-
-    AwaitedCursorExecuteCall() { this = awaited(cursorExecuteCall(sql)) }
-
-    override DataFlow::Node getSql() { result = sql }
-  }
-
-  /**
-   * An `Engine` is created when the result of calling `aiopg.sa.create_engine` is awaited.
+   * Gets an `Engine` that is created when the result of calling `aiopg.sa.create_engine` is awaited.
    * See https://aiopg.readthedocs.io/en/stable/sa.html#engine
    */
   API::Node engine() {
@@ -94,48 +57,30 @@ private module Aiopg {
   }
 
   /**
-   * A `SAConnection` is created when the result of calling `aquire` on an `Engine` is awaited.
+   * Gets an `SAConnection` that is created when the result of calling `acquire` on an `Engine` is awaited.
    * See https://aiopg.readthedocs.io/en/stable/sa.html#connection
    */
   API::Node saConnection() { result = engine().getMember("acquire").getReturn().getAwaited() }
 
   /**
-   * Calling `execute` on a `SAConnection` constructs a query.
+   * A query. Calling `execute` on a `SAConnection` constructs a query.
    * See https://aiopg.readthedocs.io/en/stable/sa.html#aiopg.sa.SAConnection.execute
    */
-  class SAConnectionExecuteCall extends SqlConstruction::Range, DataFlow::CallCfgNode {
+  class SAConnectionExecuteCall extends SqlConstruction::Range, API::CallNode {
     SAConnectionExecuteCall() { this = saConnection().getMember("execute").getACall() }
 
-    override DataFlow::Node getSql() { result in [this.getArg(0), this.getArgByName("query")] }
+    override DataFlow::Node getSql() { result = this.getParameter(0, "query").asSink() }
   }
 
   /**
-   * This is only needed to connect the argument to the execute call with the subsequnt awaiting.
-   * It should be obsolete once we have `API::CallNode` available.
-   */
-  private DataFlow::TypeTrackingNode saConnectionExecuteCall(
-    DataFlow::TypeTracker t, DataFlow::Node sql
-  ) {
-    // saConnection created from engine
-    t.start() and
-    sql = result.(SAConnectionExecuteCall).getSql()
-    or
-    exists(DataFlow::TypeTracker t2 | result = saConnectionExecuteCall(t2, sql).track(t2, t))
-  }
-
-  DataFlow::Node saConnectionExecuteCall(DataFlow::Node sql) {
-    saConnectionExecuteCall(DataFlow::TypeTracker::end(), sql).flowsTo(result)
-  }
-
-  /**
-   * Awaiting the result of calling `execute` executes the query.
+   * An awaited query. Awaiting the result of calling `execute` executes the query.
    * See https://aiopg.readthedocs.io/en/stable/sa.html#aiopg.sa.SAConnection.execute
    */
   class AwaitedSAConnectionExecuteCall extends SqlExecution::Range {
-    DataFlow::Node sql;
+    SAConnectionExecuteCall execute;
 
-    AwaitedSAConnectionExecuteCall() { this = awaited(saConnectionExecuteCall(sql)) }
+    AwaitedSAConnectionExecuteCall() { this = execute.getReturn().getAwaited().asSource() }
 
-    override DataFlow::Node getSql() { result = sql }
+    override DataFlow::Node getSql() { result = execute.getSql() }
   }
 }

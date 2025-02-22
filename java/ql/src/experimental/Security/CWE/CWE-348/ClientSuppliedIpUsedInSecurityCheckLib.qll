@@ -1,8 +1,9 @@
+deprecated module;
+
 import java
 import DataFlow
 import semmle.code.java.frameworks.Networking
 import semmle.code.java.security.QueryInjection
-import experimental.semmle.code.java.Logging
 
 /**
  * A data flow source of the client ip obtained according to the remote endpoint identifier specified
@@ -12,7 +13,7 @@ import experimental.semmle.code.java.Logging
  */
 class ClientSuppliedIpUsedInSecurityCheck extends DataFlow::Node {
   ClientSuppliedIpUsedInSecurityCheck() {
-    exists(MethodAccess ma |
+    exists(MethodCall ma |
       ma.getMethod().hasName("getHeader") and
       ma.getArgument(0).(CompileTimeConstantExpr).getStringValue().toLowerCase() in [
           "x-forwarded-for", "x-real-ip", "proxy-client-ip", "wl-proxy-client-ip",
@@ -35,7 +36,7 @@ abstract class ClientSuppliedIpUsedInSecurityCheckSink extends DataFlow::Node { 
  */
 private class CompareSink extends ClientSuppliedIpUsedInSecurityCheckSink {
   CompareSink() {
-    exists(MethodAccess ma |
+    exists(MethodCall ma |
       ma.getMethod().getName() in ["equals", "equalsIgnoreCase"] and
       ma.getMethod().getDeclaringType() instanceof TypeString and
       ma.getMethod().getNumberOfParameters() = 1 and
@@ -50,7 +51,7 @@ private class CompareSink extends ClientSuppliedIpUsedInSecurityCheckSink {
       )
     )
     or
-    exists(MethodAccess ma |
+    exists(MethodCall ma |
       ma.getMethod().getName() in ["contains", "startsWith"] and
       ma.getMethod().getDeclaringType() instanceof TypeString and
       ma.getMethod().getNumberOfParameters() = 1 and
@@ -58,7 +59,7 @@ private class CompareSink extends ClientSuppliedIpUsedInSecurityCheckSink {
       ma.getAnArgument().(CompileTimeConstantExpr).getStringValue().regexpMatch(getIpAddressRegex()) // Matches IP-address-like strings
     )
     or
-    exists(MethodAccess ma |
+    exists(MethodCall ma |
       ma.getMethod().hasName("startsWith") and
       ma.getMethod()
           .getDeclaringType()
@@ -68,7 +69,7 @@ private class CompareSink extends ClientSuppliedIpUsedInSecurityCheckSink {
       ma.getAnArgument().(CompileTimeConstantExpr).getStringValue().regexpMatch(getIpAddressRegex())
     )
     or
-    exists(MethodAccess ma |
+    exists(MethodCall ma |
       ma.getMethod().getName() in ["equals", "equalsIgnoreCase"] and
       ma.getMethod()
           .getDeclaringType()
@@ -82,9 +83,8 @@ private class CompareSink extends ClientSuppliedIpUsedInSecurityCheckSink {
 }
 
 /** A data flow sink for sql operation. */
-private class SqlOperationSink extends ClientSuppliedIpUsedInSecurityCheckSink {
-  SqlOperationSink() { this instanceof QueryInjectionSink }
-}
+private class SqlOperationSink extends ClientSuppliedIpUsedInSecurityCheckSink instanceof QueryInjectionSink
+{ }
 
 /** A method that split string. */
 class SplitMethod extends Method {

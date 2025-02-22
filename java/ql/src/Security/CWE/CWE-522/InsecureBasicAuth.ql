@@ -6,6 +6,7 @@
  *              the data vulnerable to packet sniffing.
  * @kind path-problem
  * @problem.severity warning
+ * @security-severity 8.8
  * @precision medium
  * @id java/insecure-basic-auth
  * @tags security
@@ -15,9 +16,9 @@
 
 import java
 import semmle.code.java.security.InsecureBasicAuthQuery
-import DataFlow::PathGraph
+import InsecureBasicAuthFlow::PathGraph
 
-from DataFlow::PathNode source, DataFlow::PathNode sink, BasicAuthFlowConfig config
-where config.hasFlowPath(source, sink)
-select sink.getNode(), source, sink, "Insecure basic authentication from $@.", source.getNode(),
+from InsecureBasicAuthFlow::PathNode source, InsecureBasicAuthFlow::PathNode sink
+where InsecureBasicAuthFlow::flowPath(source, sink)
+select sink.getNode(), source, sink, "Insecure basic authentication from a $@.", source.getNode(),
   "HTTP URL"

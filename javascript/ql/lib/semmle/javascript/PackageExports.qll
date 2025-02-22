@@ -11,36 +11,14 @@ private import semmle.javascript.internal.CachedStages
  * Gets a parameter that is a library input to a top-level package.
  */
 cached
-DataFlow::SourceNode getALibraryInputParameter() {
+DataFlow::Node getALibraryInputParameter() {
   Stages::Taint::ref() and
   exists(int bound, DataFlow::FunctionNode func |
     func = getAValueExportedByPackage().getABoundFunctionValue(bound)
   |
     result = func.getParameter(any(int arg | arg >= bound))
     or
-    result = getAnArgumentsRead(func.getFunction())
-  )
-}
-
-private DataFlow::SourceNode getAnArgumentsRead(Function func) {
-  exists(DataFlow::PropRead read |
-    not read.getPropertyName() = "length" and
-    result = read
-  |
-    read.getBase() = func.getArgumentsVariable().getAnAccess().flow()
-    or
-    exists(DataFlow::MethodCallNode call |
-      call =
-        DataFlow::globalVarRef("Array")
-            .getAPropertyRead("prototype")
-            .getAPropertyRead("slice")
-            .getAMethodCall("call")
-      or
-      call = DataFlow::globalVarRef("Array").getAMethodCall("from")
-    |
-      call.getArgument(0) = func.getArgumentsVariable().getAnAccess().flow() and
-      call.flowsTo(read.getBase())
-    )
+    result = func.getFunction().getArgumentsVariable().getAnAccess().flow()
   )
 }
 
@@ -52,7 +30,7 @@ private import NodeModuleResolutionImpl as NodeModule
 private DataFlow::Node getAValueExportedByPackage() {
   // The base case, an export from a named `package.json` file.
   result =
-    getAnExportFromModule(any(PackageJSON pack | exists(pack.getPackageName())).getMainModule())
+    getAnExportFromModule(any(PackageJson pack | exists(pack.getPackageName())).getExportedModule(_))
   or
   // module.exports.bar.baz = result;
   exists(DataFlow::PropWrite write |
@@ -67,11 +45,24 @@ private DataFlow::Node getAValueExportedByPackage() {
   // module.exports = new Foo();
   exists(DataFlow::SourceNode callee |
     callee = getAValueExportedByPackage().(DataFlow::NewNode).getCalleeNode().getALocalSource()
+    or
+    callee.(DataFlow::ClassNode).getConstructor() =
+      getAValueExportedByPackage().(DataFlow::NewNode).getCalleeNode().getAFunctionValue()
   |
     result = callee.getAPropertyRead("prototype").getAPropertyWrite(publicPropertyName()).getRhs()
     or
     result = callee.(DataFlow::ClassNode).getInstanceMethod(publicPropertyName()) and
     not isPrivateMethodDeclaration(result)
+  )
+  or
+  // module.exports.foo = function () {
+  //   return new Foo(); // <- result
+  // };
+  exists(DataFlow::FunctionNode func, DataFlow::NewNode inst, DataFlow::ClassNode clz |
+    func = getAValueExportedByPackage().getALocalSource() and inst = unique( | | func.getAReturn())
+  |
+    clz.getAnInstanceReference() = inst and
+    result = clz.getAnInstanceMember(_)
   )
   or
   result = getAValueExportedByPackage().getALocalSource()
@@ -83,6 +74,25 @@ private DataFlow::Node getAValueExportedByPackage() {
   // module.exports.foo = require("./other-module.js");
   exists(Module mod |
     mod = getAValueExportedByPackage().getEnclosingExpr().(Import).getImportedModule()
+  |
+    result = getAnExportFromModule(mod)
+  )
+  or
+  // re-export of a value from another module
+  // `module.exports.foo = require("./other").bar;`
+  // other.js:
+  // `module.exports.bar = function () { ... };`
+  exists(DataFlow::PropRead read, Import imp |
+    read = getAValueExportedByPackage() and
+    read.getBase().getALocalSource() = imp.getImportedModuleNode() and
+    result = imp.getImportedModule().getAnExportedValue(read.getPropertyName())
+  )
+  or
+  // require("./other-module.js"); inside an AMD module.
+  exists(Module mod, CallExpr call |
+    call = getAValueExportedByPackage().asExpr() and
+    call = any(AmdModuleDefinition e).getARequireCall() and
+    mod = call.getAnArgument().(Import).getImportedModule()
   |
     result = getAnExportFromModule(mod)
   )
@@ -117,17 +127,25 @@ private DataFlow::Node getAValueExportedByPackage() {
   // }));
   // ```
   // Such files are not recognized as modules, so we manually use `NodeModule::resolveMainModule` to resolve the file against a `package.json` file.
-  exists(ImmediatelyInvokedFunctionExpr func, DataFlow::ParameterNode prev, int i |
-    prev.getName() = "factory" and
-    func.getParameter(i) = prev.getParameter() and
-    result = func.getInvocation().getArgument(i).flow().getAFunctionValue().getAReturn() and
-    DataFlow::globalVarRef("define").getACall().getArgument(1) = prev.getALocalUse() and
+  exists(ImmediatelyInvokedFunctionExpr func, DataFlow::ParameterNode factory, int i |
+    factory.getName() = "factory" and
+    func.getParameter(i) = factory.getParameter() and
+    DataFlow::globalVarRef("define").getACall().getAnArgument() = factory.getALocalUse() and
     func.getFile() =
       min(int j, File f |
-        f = NodeModule::resolveMainModule(any(PackageJSON pack | exists(pack.getPackageName())), j)
+        f =
+          NodeModule::resolveMainModule(any(PackageJson pack | exists(pack.getPackageName())), j,
+            ".")
       |
         f order by j
       )
+  |
+    result = func.getInvocation().getArgument(i).flow().getAFunctionValue().getAReturn()
+    or
+    exists(DataFlow::ParameterNode exports | exports.getName() = "exports" |
+      exports = func.getInvocation().getAnArgument().flow().getAFunctionValue().getParameter(0) and
+      result = exports.getAPropertyWrite().getRhs()
+    )
   )
   or
   // the exported value is a call to a unique callee
@@ -141,17 +159,22 @@ private DataFlow::Node getAValueExportedByPackage() {
     result = unique( | | call.getCalleeNode().getAFunctionValue()).getAReturn()
   )
   or
-  // the exported value is a function that returns another import.
-  // ```JavaScript
-  // module.exports = function foo() {
-  //   return require("./other-module.js");
-  // }
-  // ```
-  exists(DataFlow::FunctionNode func, Module mod |
+  exists(DataFlow::FunctionNode func |
     func = getAValueExportedByPackage().getABoundFunctionValue(_)
   |
-    mod = func.getAReturn().getALocalSource().getEnclosingExpr().(Import).getImportedModule() and
-    result = getAnExportFromModule(mod)
+    // the exported value is a function that returns another import.
+    // ```JavaScript
+    // module.exports = function foo() {
+    //   return require("./other-module.js");
+    // }
+    // ```
+    exists(Module mod |
+      mod = func.getAReturn().getALocalSource().getEnclosingExpr().(Import).getImportedModule() and
+      result = getAnExportFromModule(mod)
+    )
+    or
+    // a function that returns an object of methods. This acts a bit like a class.
+    result = func.getAReturn().getALocalSource().getAPropertySource().(DataFlow::FunctionNode)
   )
   or
   // *****
@@ -182,7 +205,8 @@ private DataFlow::Node getAValueExportedByPackage() {
   or
   // Object.assign and friends
   exists(ExtendCall assign |
-    getAValueExportedByPackage() = [assign, assign.getDestinationOperand()] and
+    getAValueExportedByPackage() = [assign, assign.getDestinationOperand().getALocalSource()]
+  |
     result = assign.getASourceOperand()
   )
   or
@@ -215,6 +239,10 @@ private DataFlow::Node getAnExportFromModule(Module mod) {
   result = mod.getAnExportedValue(publicPropertyName())
   or
   result = mod.getABulkExportedNode()
+  or
+  // exports saved to the global object
+  result = DataFlow::globalObjectRef().getAPropertyWrite().getRhs() and
+  result.getTopLevel() = mod
   or
   result.analyze().getAValue() = TAbstractModuleObject(mod)
 }

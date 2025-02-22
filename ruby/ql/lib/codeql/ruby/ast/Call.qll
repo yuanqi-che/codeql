@@ -41,7 +41,7 @@ class Call extends Expr instanceof CallImpl {
   final Expr getKeywordArgument(string keyword) {
     exists(Pair p |
       p = this.getAnArgument() and
-      p.getKey().(SymbolLiteral).getValueText() = keyword and
+      p.getKey().getConstantValue().isSymbol(keyword) and
       result = p.getValue()
     )
   }
@@ -53,9 +53,12 @@ class Call extends Expr instanceof CallImpl {
 
   /** Gets a potential target of this call, if any. */
   final Callable getATarget() {
-    exists(DataFlowCall c | this = c.asCall().getExpr() |
-      TCfgScope(result) = [viableCallable(c), viableCallableLambda(c, _)]
+    exists(DataFlowCall c |
+      this = c.asCall().getExpr() and
+      TCfgScope(result) = viableCallableLambda(c, _)
     )
+    or
+    result = getTarget(TNormalCall(this.getAControlFlowNode()))
   }
 
   override AstNode getAChild(string pred) {
@@ -94,6 +97,15 @@ class MethodCall extends Call instanceof MethodCallImpl {
    * ```
    *
    * the result is `"bar"`.
+   *
+   * Super calls call a method with the same name as the current method, so
+   * the result for a super call is the name of the current method.
+   * E.g:
+   * ```rb
+   * def foo
+   *  super # the result for this super call is "foo"
+   * end
+   * ```
    */
   final string getMethodName() { result = super.getMethodNameImpl() }
 
@@ -104,6 +116,25 @@ class MethodCall extends Call instanceof MethodCallImpl {
    * ```
    */
   final Block getBlock() { result = super.getBlockImpl() }
+
+  /**
+   * Gets the block argument of this method call, if any.
+   * ```rb
+   * foo(&block)
+   * ```
+   */
+  final BlockArgument getBlockArgument() { result = this.getAnArgument() }
+
+  /** Holds if this method call has a block or block argument. */
+  final predicate hasBlock() { exists(this.getBlock()) or exists(this.getBlockArgument()) }
+
+  /**
+   * Holds if the safe navigation operator (`&.`) is used in this call.
+   * ```rb
+   * foo&.empty?
+   * ```
+   */
+  final predicate isSafeNavigation() { super.isSafeNavigationImpl() }
 
   override string toString() { result = "call to " + this.getMethodName() }
 
@@ -117,6 +148,16 @@ class MethodCall extends Call instanceof MethodCallImpl {
 }
 
 /**
+ * A `Method` call that has no known target.
+ * These will typically be calls to methods inherited from a superclass.
+ * TODO: When API Graphs is able to resolve calls to methods like `Kernel.send`
+ * this class is no longer necessary and should be removed.
+ */
+class UnknownMethodCall extends MethodCall {
+  UnknownMethodCall() { not exists(this.(Call).getATarget()) }
+}
+
+/**
  * A call to a setter method.
  * ```rb
  * self.foo = 10
@@ -127,6 +168,21 @@ class SetterMethodCall extends MethodCall, TMethodCallSynth {
   SetterMethodCall() { this = TMethodCallSynth(_, _, _, true, _) }
 
   final override string getAPrimaryQlClass() { result = "SetterMethodCall" }
+
+  /**
+   * Gets the name of the method being called without the trailing `=`. For example, in the following
+   * two statements the target name is `value`:
+   * ```rb
+   * foo.value=(1)
+   * foo.value = 1
+   * ```
+   */
+  final string getTargetName() {
+    exists(string methodName |
+      methodName = this.getMethodName() and
+      result = methodName.prefix(methodName.length() - 1)
+    )
+  }
 }
 
 /**
@@ -165,6 +221,8 @@ class YieldCall extends Call instanceof YieldCallImpl {
  */
 class SuperCall extends MethodCall instanceof SuperCallImpl {
   final override string getAPrimaryQlClass() { result = "SuperCall" }
+
+  override string toString() { result = "super call to " + this.getMethodName() }
 }
 
 /**
@@ -187,7 +245,10 @@ class BlockArgument extends Expr, TBlockArgument {
    * foo(&bar)
    * ```
    */
-  final Expr getValue() { toGenerated(result) = g.getChild() }
+  final Expr getValue() {
+    toGenerated(result) = g.getChild() or
+    synthChild(this, 0, result)
+  }
 
   final override string toString() { result = "&..." }
 

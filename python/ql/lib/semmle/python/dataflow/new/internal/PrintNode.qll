@@ -9,6 +9,7 @@
 
 private import python
 private import semmle.python.dataflow.new.DataFlow
+private import semmle.python.dataflow.new.internal.DataFlowPrivate as DataFlowPrivate
 
 /**
  * INTERNAL: Do not use.
@@ -17,7 +18,7 @@ private import semmle.python.dataflow.new.DataFlow
  */
 string prettyExpr(Expr e) {
   not e instanceof Num and
-  not e instanceof StrConst and
+  not e instanceof StringLiteral and
   not e instanceof Subscript and
   not e instanceof Call and
   not e instanceof Attribute and
@@ -26,8 +27,8 @@ string prettyExpr(Expr e) {
   result = e.(Num).getN()
   or
   result =
-    e.(StrConst).getPrefix() + e.(StrConst).getText() +
-      e.(StrConst).getPrefix().regexpReplaceAll("[a-zA-Z]+", "")
+    e.(StringLiteral).getPrefix() + e.(StringLiteral).getText() +
+      e.(StringLiteral).getPrefix().regexpReplaceAll("[a-zA-Z]+", "")
   or
   result = prettyExpr(e.(Subscript).getObject()) + "[" + prettyExpr(e.(Subscript).getIndex()) + "]"
   or
@@ -54,7 +55,7 @@ string prettyNode(DataFlow::Node node) {
  * INTERNAL: Do not use.
  *
  * Gets the pretty-printed version of the DataFlow::Node `node`, that is suitable for use
- * with `TestUtilities.InlineExpectationsTest` (that is, no spaces unless required).
+ * with `utils.test.InlineExpectationsTest` (that is, no spaces unless required).
  */
 bindingset[node]
 string prettyNodeForInlineTest(DataFlow::Node node) {
@@ -66,7 +67,12 @@ string prettyNodeForInlineTest(DataFlow::Node node) {
     result = "[post]" + prettyExpr(e)
   )
   or
+  exists(Expr e | e = node.(DataFlowPrivate::SyntheticPreUpdateNode).getPostUpdateNode().asExpr() |
+    result = "[pre]" + prettyExpr(e)
+  )
+  or
   not exists(node.asExpr()) and
-  not exists(Expr e | e = node.(DataFlow::PostUpdateNode).getPreUpdateNode().asExpr()) and
+  not exists(node.(DataFlow::PostUpdateNode).getPreUpdateNode().asExpr()) and
+  not exists(node.(DataFlowPrivate::SyntheticPreUpdateNode).getPostUpdateNode().asExpr()) and
   result = node.toString()
 }

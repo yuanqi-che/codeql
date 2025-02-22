@@ -8,12 +8,13 @@
  * @id java/predictable-seed
  * @tags security
  *       external/cwe/cwe-335
+ *       external/cwe/cwe-337
  */
 
 import java
 import semmle.code.java.security.RandomQuery
 
-from GetRandomData da, RValue use, PredictableSeedExpr source
+from GetRandomData da, VarRead use, PredictableSeedExpr source
 where
   da.getQualifier() = use and
   unsafelySeeded(use, source)

@@ -7,6 +7,7 @@
 private import python
 private import semmle.python.dataflow.new.DataFlow
 private import semmle.python.Concepts
+private import semmle.python.frameworks.data.ModelsAsData
 private import semmle.python.dataflow.new.RemoteFlowSources
 private import semmle.python.dataflow.new.BarrierGuards
 
@@ -15,7 +16,7 @@ private import semmle.python.dataflow.new.BarrierGuards
  * "reflected server-side cross-site scripting"
  * vulnerabilities, as well as extension points for adding your own.
  */
-module ReflectedXSS {
+module ReflectedXss {
   /**
    * A data flow source for "reflected server-side cross-site scripting" vulnerabilities.
    */
@@ -32,21 +33,30 @@ module ReflectedXSS {
   abstract class Sanitizer extends DataFlow::Node { }
 
   /**
-   * A sanitizer guard for "reflected server-side cross-site scripting" vulnerabilities.
+   * DEPRECATED: Use `ActiveThreatModelSource` from Concepts instead!
    */
-  abstract class SanitizerGuard extends DataFlow::BarrierGuard { }
+  deprecated class RemoteFlowSourceAsSource = ActiveThreatModelSourceAsSource;
 
   /**
-   * A source of remote user input, considered as a flow source.
+   * An active threat-model source, considered as a flow source.
    */
-  class RemoteFlowSourceAsSource extends Source, RemoteFlowSource { }
+  private class ActiveThreatModelSourceAsSource extends Source, ActiveThreatModelSource { }
+
+  /**
+   * A data flow sink for "reflected cross-site scripting" vulnerabilities.
+   */
+  private class SinkFromModel extends Sink {
+    SinkFromModel() {
+      this = ModelOutput::getASinkNode(["html-injection", "js-injection"]).asSink()
+    }
+  }
 
   /**
    * The body of a HTTP response that will be returned from a server, considered as a flow sink.
    */
   class ServerHttpResponseBodyAsSink extends Sink {
     ServerHttpResponseBodyAsSink() {
-      exists(HTTP::Server::HttpResponse response |
+      exists(Http::Server::HttpResponse response |
         response.getMimetype().toLowerCase() = "text/html" and
         this = response.getBody()
       )
@@ -70,7 +80,10 @@ module ReflectedXSS {
   }
 
   /**
-   * A comparison with a constant string, considered as a sanitizer-guard.
+   * A comparison with a constant, considered as a sanitizer-guard.
    */
-  class StringConstCompareAsSanitizerGuard extends SanitizerGuard, StringConstCompare { }
+  class ConstCompareAsSanitizerGuard extends Sanitizer, ConstCompareBarrier { }
+
+  /** DEPRECATED: Use ConstCompareAsSanitizerGuard instead. */
+  deprecated class StringConstCompareAsSanitizerGuard = ConstCompareAsSanitizerGuard;
 }

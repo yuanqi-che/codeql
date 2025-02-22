@@ -1,48 +1,47 @@
 import java
-import semmle.code.xml.XML
 
 /**
  * Holds if any struts XML files are included in this snapshot.
  */
-predicate isStrutsXMLIncluded() { exists(StrutsXMLFile strutsXML) }
+predicate isStrutsXmlIncluded() { exists(StrutsXmlFile strutsXml) }
 
 /**
  * A struts 2 configuration file.
  */
-abstract class StrutsXMLFile extends XMLFile {
-  StrutsXMLFile() {
+abstract class StrutsXmlFile extends XmlFile {
+  StrutsXmlFile() {
     // Contains a single top-level XML node named "struts".
-    count(XMLElement e | e = this.getAChild()) = 1 and
+    count(XmlElement e | e = this.getAChild()) = 1 and
     this.getAChild().getName() = "struts"
   }
 
   /**
    * Gets a "root" struts configuration file that includes this file.
    */
-  StrutsRootXMLFile getARoot() { result.getAnIncludedFile() = this }
+  StrutsRootXmlFile getARoot() { result.getAnIncludedFile() = this }
 
   /**
    * Gets a directly included file.
    */
-  StrutsXMLFile getADirectlyIncludedFile() {
-    exists(StrutsXMLInclude include | include.getFile() = this | result = include.getIncludedFile())
+  StrutsXmlFile getADirectlyIncludedFile() {
+    exists(StrutsXmlInclude include | include.getFile() = this | result = include.getIncludedFile())
   }
 
   /**
    * Gets a transitively included file.
    */
-  StrutsXMLFile getAnIncludedFile() { result = this.getADirectlyIncludedFile*() }
+  StrutsXmlFile getAnIncludedFile() { result = this.getADirectlyIncludedFile*() }
 
   /**
    * Gets a `<constant>` defined in this file, or an included file.
    */
-  StrutsXMLConstant getAConstant() { result.getFile() = this.getAnIncludedFile() }
+  StrutsXmlConstant getAConstant() { result.getFile() = this.getAnIncludedFile() }
 
   /**
    * Gets the value of the constant with the given `name`.
    */
   string getConstantValue(string name) {
-    exists(StrutsXMLConstant constant | constant = this.getAConstant() |
+    exists(StrutsXmlConstant constant | constant = this.getAConstant() |
       constant.getConstantName() = name and
       result = constant.getConstantValue()
     )
@@ -54,8 +53,8 @@ abstract class StrutsXMLFile extends XMLFile {
  *
  * Root configurations either have the name `struts.xml` or `struts-plugin.xml`.
  */
-class StrutsRootXMLFile extends StrutsXMLFile {
-  StrutsRootXMLFile() {
+class StrutsRootXmlFile extends StrutsXmlFile {
+  StrutsRootXmlFile() {
     this.getBaseName() = "struts.xml" or
     this.getBaseName() = "struts-plugin.xml"
   }
@@ -64,8 +63,8 @@ class StrutsRootXMLFile extends StrutsXMLFile {
 /**
  * A Struts 2 configuration XML file included, directly or indirectly, by a root Struts configuration.
  */
-class StrutsIncludedXMLFile extends StrutsXMLFile {
-  StrutsIncludedXMLFile() { exists(StrutsXMLInclude include | this = include.getIncludedFile()) }
+class StrutsIncludedXmlFile extends StrutsXmlFile {
+  StrutsIncludedXmlFile() { exists(StrutsXmlInclude include | this = include.getIncludedFile()) }
 }
 
 /**
@@ -75,7 +74,7 @@ class StrutsFolder extends Folder {
   StrutsFolder() {
     exists(Container c | c = this.getAChildContainer() |
       c instanceof StrutsFolder or
-      c instanceof StrutsXMLFile
+      c instanceof StrutsXmlFile
     )
   }
 
@@ -87,7 +86,7 @@ class StrutsFolder extends Folder {
   /**
    * Gets a struts root configuration that applies to this folder.
    */
-  StrutsRootXMLFile getAStrutsRootFile() {
+  StrutsRootXmlFile getAStrutsRootFile() {
     result = this.getAChildContainer() or
     result = this.getAChildContainer().(StrutsFolder).getAStrutsRootFile()
   }
@@ -96,8 +95,8 @@ class StrutsFolder extends Folder {
 /**
  * An XML element in a `StrutsXMLFile`.
  */
-class StrutsXMLElement extends XMLElement {
-  StrutsXMLElement() { this.getFile() instanceof StrutsXMLFile }
+class StrutsXmlElement extends XmlElement {
+  StrutsXmlElement() { this.getFile() instanceof StrutsXmlFile }
 
   /**
    * Gets the value for this element, with leading and trailing whitespace trimmed.
@@ -111,8 +110,8 @@ class StrutsXMLElement extends XMLElement {
  * This indicates that the file specified in the `file` attribute should be included in the struts
  * configuration. The file is looked up using the classpath.
  */
-class StrutsXMLInclude extends StrutsXMLElement {
-  StrutsXMLInclude() { this.getName() = "include" }
+class StrutsXmlInclude extends StrutsXmlElement {
+  StrutsXmlInclude() { this.getName() = "include" }
 
   /**
    * Gets the XMLFile that we believe is included by this include statement.
@@ -120,7 +119,7 @@ class StrutsXMLInclude extends StrutsXMLElement {
    * We have no notion of classpath, so we assume that any file that matches the path could
    * potentially be included.
    */
-  XMLFile getIncludedFile() {
+  XmlFile getIncludedFile() {
     exists(string file | file = this.getAttribute("file").getValue() |
       result.getAbsolutePath().matches("%" + escapeForMatch(file))
     )
@@ -150,8 +149,8 @@ private predicate strutsWildcardMatching(string matches, string wildcardstring) 
 /**
  * A `<action>` element within a `struts.xml` file.
  */
-class StrutsXMLAction extends StrutsXMLElement {
-  StrutsXMLAction() { this.getName() = "action" }
+class StrutsXmlAction extends StrutsXmlElement {
+  StrutsXmlAction() { this.getName() = "action" }
 
   /**
    * Gets the `Class` that is referenced by this Struts action.
@@ -178,8 +177,8 @@ class StrutsXMLAction extends StrutsXMLElement {
 /**
  * A `<constant>` property, representing a configuration parameter to struts.
  */
-class StrutsXMLConstant extends StrutsXMLElement {
-  StrutsXMLConstant() { this.getName() = "constant" }
+class StrutsXmlConstant extends StrutsXmlElement {
+  StrutsXmlConstant() { this.getName() = "constant" }
 
   string getConstantName() { result = this.getAttribute("name").getValue() }
 

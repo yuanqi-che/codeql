@@ -1,15 +1,18 @@
 private import cpp
 private import semmle.code.cpp.ir.IR
 private import semmle.code.cpp.ir.dataflow.DataFlow
-private import semmle.code.cpp.ir.dataflow.internal.DataFlowPrivate
-private import semmle.code.cpp.ir.dataflow.internal.DataFlowUtil
+private import DataFlowPrivate
+private import DataFlowUtil
 private import DataFlowImplCommon as DataFlowImplCommon
 
 /**
  * Gets a function that might be called by `call`.
+ *
+ * This predicate does not take additional call targets
+ * from `AdditionalCallTarget` into account.
  */
 cached
-Function viableCallable(CallInstruction call) {
+DataFlowCallable defaultViableCallable(DataFlowCall call) {
   DataFlowImplCommon::forceCachingInSameStage() and
   result = call.getStaticCallTarget()
   or
@@ -20,13 +23,26 @@ Function viableCallable(CallInstruction call) {
   // function with the right signature is present in the database, we return
   // that as a potential callee.
   exists(string qualifiedName, int nparams |
-    callSignatureWithoutBody(qualifiedName, nparams, call) and
-    functionSignatureWithBody(qualifiedName, nparams, result) and
+    callSignatureWithoutBody(qualifiedName, nparams, call.asCallInstruction()) and
+    functionSignatureWithBody(qualifiedName, nparams, result.getUnderlyingCallable()) and
     strictcount(Function other | functionSignatureWithBody(qualifiedName, nparams, other)) = 1
   )
   or
   // Virtual dispatch
-  result = call.(VirtualDispatch::DataSensitiveCall).resolve()
+  result.asSourceCallable() = call.(VirtualDispatch::DataSensitiveCall).resolve()
+}
+
+/**
+ * Gets a function that might be called by `call`.
+ */
+cached
+DataFlowCallable viableCallable(DataFlowCall call) {
+  result = defaultViableCallable(call)
+  or
+  // Additional call targets
+  result.getUnderlyingCallable() =
+    any(AdditionalCallTarget additional)
+        .viableTarget(call.asCallInstruction().getUnconvertedResultExpression())
 }
 
 /**
@@ -63,7 +79,7 @@ private module VirtualDispatch {
         this.flowsFrom(other, allowOtherFromArg)
       |
         // Call argument
-        exists(DataFlowCall call, int i |
+        exists(DataFlowCall call, Position i |
           other
               .(DataFlow::ParameterNode)
               .isParameterOf(pragma[only_bind_into](call).getStaticCallTarget(), i) and
@@ -116,12 +132,12 @@ private module VirtualDispatch {
   /** Holds if `addressInstr` is an instruction that produces the address of `var`. */
   private predicate addressOfGlobal(Instruction addressInstr, GlobalOrNamespaceVariable var) {
     // Access directly to the global variable
-    addressInstr.(VariableAddressInstruction).getASTVariable() = var
+    addressInstr.(VariableAddressInstruction).getAstVariable() = var
     or
     // Access to a field on a global union
     exists(FieldAddressInstruction fa |
       fa = addressInstr and
-      fa.getObjectAddress().(VariableAddressInstruction).getASTVariable() = var and
+      fa.getObjectAddress().(VariableAddressInstruction).getAstVariable() = var and
       fa.getField().getDeclaringType() instanceof Union
     )
   }
@@ -136,14 +152,14 @@ private module VirtualDispatch {
     ReturnNode node, ReturnKind kind, DataFlowCallable callable
   ) {
     node.getKind() = kind and
-    node.getEnclosingCallable() = callable
+    node.getFunction() = callable.getUnderlyingCallable()
   }
 
   /** Call through a function pointer. */
   private class DataSensitiveExprCall extends DataSensitiveCall {
     DataSensitiveExprCall() { not exists(this.getStaticCallTarget()) }
 
-    override DataFlow::Node getDispatchValue() { result.asInstruction() = this.getCallTarget() }
+    override DataFlow::Node getDispatchValue() { result.asOperand() = this.getCallTargetOperand() }
 
     override Function resolve() {
       exists(FunctionInstruction fi |
@@ -162,10 +178,15 @@ private module VirtualDispatch {
   /** Call to a virtual function. */
   private class DataSensitiveOverriddenFunctionCall extends DataSensitiveCall {
     DataSensitiveOverriddenFunctionCall() {
-      exists(this.getStaticCallTarget().(VirtualFunction).getAnOverridingFunction())
+      exists(
+        this.getStaticCallTarget()
+            .getUnderlyingCallable()
+            .(VirtualFunction)
+            .getAnOverridingFunction()
+      )
     }
 
-    override DataFlow::Node getDispatchValue() { result.asInstruction() = this.getThisArgument() }
+    override DataFlow::Node getDispatchValue() { result.asInstruction() = this.getArgument(-1) }
 
     override MemberFunction resolve() {
       exists(Class overridingClass |
@@ -180,7 +201,8 @@ private module VirtualDispatch {
      */
     pragma[noinline]
     private predicate overrideMayAffectCall(Class overridingClass, MemberFunction overridingFunction) {
-      overridingFunction.getAnOverriddenFunction+() = this.getStaticCallTarget().(VirtualFunction) and
+      overridingFunction.getAnOverriddenFunction+() =
+        this.getStaticCallTarget().getUnderlyingCallable().(VirtualFunction) and
       overridingFunction.getDeclaringType() = overridingClass
     }
 
@@ -235,21 +257,19 @@ private predicate functionSignature(Function f, string qualifiedName, int nparam
  * Holds if the set of viable implementations that can be called by `call`
  * might be improved by knowing the call context.
  */
-predicate mayBenefitFromCallContext(CallInstruction call, Function f) {
-  mayBenefitFromCallContext(call, f, _)
-}
+predicate mayBenefitFromCallContext(DataFlowCall call) { mayBenefitFromCallContext(call, _, _) }
 
 /**
  * Holds if `call` is a call through a function pointer, and the pointer
  * value is given as the `arg`'th argument to `f`.
  */
 private predicate mayBenefitFromCallContext(
-  VirtualDispatch::DataSensitiveCall call, Function f, int arg
+  VirtualDispatch::DataSensitiveCall call, DataFlowCallable f, int arg
 ) {
   f = pragma[only_bind_out](call).getEnclosingCallable() and
   exists(InitializeParameterInstruction init |
     not exists(call.getStaticCallTarget()) and
-    init.getEnclosingFunction() = f and
+    init.getEnclosingFunction() = f.getUnderlyingCallable() and
     call.flowsFrom(DataFlow::instructionNode(init), _) and
     init.getParameter().getIndex() = arg
   )
@@ -259,23 +279,14 @@ private predicate mayBenefitFromCallContext(
  * Gets a viable dispatch target of `call` in the context `ctx`. This is
  * restricted to those `call`s for which a context might make a difference.
  */
-Function viableImplInCallContext(CallInstruction call, CallInstruction ctx) {
+DataFlowCallable viableImplInCallContext(DataFlowCall call, DataFlowCall ctx) {
   result = viableCallable(call) and
-  exists(int i, Function f |
+  exists(int i, DataFlowCallable f |
     mayBenefitFromCallContext(pragma[only_bind_into](call), f, i) and
     f = ctx.getStaticCallTarget() and
-    result = ctx.getArgument(i).getUnconvertedResultExpression().(FunctionAccess).getTarget()
+    result.asSourceCallable() =
+      ctx.getArgument(i).getUnconvertedResultExpression().(FunctionAccess).getTarget()
   )
-}
-
-/** A parameter position represented by an integer. */
-class ParameterPosition extends int {
-  ParameterPosition() { any(ParameterNode p).isParameterOf(_, this) }
-}
-
-/** An argument position represented by an integer. */
-class ArgumentPosition extends int {
-  ArgumentPosition() { any(ArgumentNode a).argumentOf(_, this) }
 }
 
 /** Holds if arguments at position `apos` match parameters at position `ppos`. */

@@ -21,10 +21,10 @@ class Synched extends Stmt {
   }
 }
 
-from MethodAccess ma, SynchronizedStmt synch
+from MethodCall ma, SynchronizedStmt synch
 where
   ma.getMethod().hasName("wait") and
   ma.getMethod().getDeclaringType().hasQualifiedName("java.lang", "Object") and
   ma.getEnclosingStmt().getEnclosingStmt*() = synch and
   synch.getEnclosingStmt+() instanceof Synched
-select ma, "wait() with two locks held."
+select ma, "This calls 'Object.wait()' with two locks held."

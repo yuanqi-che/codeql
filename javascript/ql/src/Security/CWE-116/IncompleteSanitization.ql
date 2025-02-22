@@ -9,8 +9,9 @@
  * @id js/incomplete-sanitization
  * @tags correctness
  *       security
- *       external/cwe/cwe-116
  *       external/cwe/cwe-020
+ *       external/cwe/cwe-080
+ *       external/cwe/cwe-116
  */
 
 import javascript
@@ -22,7 +23,7 @@ string metachar() { result = "'\"\\&<>\n\r\t*|{}[]%$".charAt(_) }
 
 /** Gets a string matched by `e` in a `replace` call. */
 string getAMatchedString(DataFlow::Node e) {
-  result = e.(DataFlow::RegExpLiteralNode).getRoot().getAMatchedString()
+  result = e.(DataFlow::RegExpCreationNode).getRoot().getAMatchedString()
   or
   result = e.getStringValue()
 }
@@ -51,8 +52,8 @@ predicate isSimpleAlt(RegExpAlt t) { forall(RegExpTerm ch | ch = t.getAChild() |
  * Holds if `mce` is of the form `x.replace(re, new)`, where `re` is a global
  * regular expression and `new` prefixes the matched string with a backslash.
  */
-predicate isBackslashEscape(StringReplaceCall mce, DataFlow::RegExpLiteralNode re) {
-  mce.isGlobal() and
+predicate isBackslashEscape(StringReplaceCall mce, DataFlow::RegExpCreationNode re) {
+  mce.maybeGlobal() and
   re = mce.getRegExp() and
   (
     // replacement with `\$&`, `\$1` or similar
@@ -71,7 +72,7 @@ predicate allBackslashesEscaped(DataFlow::Node nd) {
   nd instanceof JsonStringifyCall
   or
   // check whether `nd` itself escapes backslashes
-  exists(DataFlow::RegExpLiteralNode rel | isBackslashEscape(nd, rel) |
+  exists(DataFlow::RegExpCreationNode rel | isBackslashEscape(nd, rel) |
     // if it's a complex regexp, we conservatively assume that it probably escapes backslashes
     not isSimple(rel.getRoot()) or
     getAMatchedString(rel) = "\\"
@@ -95,7 +96,7 @@ predicate allBackslashesEscaped(DataFlow::Node nd) {
 /**
  * Holds if `repl` looks like a call to "String.prototype.replace" that deliberately removes the first occurrence of `str`.
  */
-predicate removesFirstOccurence(StringReplaceCall repl, string str) {
+predicate removesFirstOccurrence(StringReplaceCall repl, string str) {
   not exists(repl.getRegExp()) and repl.replaces(str, "")
 }
 
@@ -116,8 +117,8 @@ predicate isDelimiterUnwrapper(
     or
     left = "'" and right = "'"
   |
-    removesFirstOccurence(leftUnwrap, left) and
-    removesFirstOccurence(rightUnwrap, right) and
+    removesFirstOccurrence(leftUnwrap, left) and
+    removesFirstOccurrence(rightUnwrap, right) and
     leftUnwrap.getAMethodCall() = rightUnwrap
   )
 }
@@ -142,12 +143,21 @@ predicate whitelistedRemoval(StringReplaceCall repl) {
   )
 }
 
+/**
+ * Gets a nice string representation of the pattern or value of the node.
+ */
+string getPatternOrValueString(DataFlow::Node node) {
+  if node instanceof DataFlow::RegExpConstructorInvokeNode
+  then result = "/" + node.(DataFlow::RegExpConstructorInvokeNode).getRoot() + "/"
+  else result = node.toString()
+}
+
 from StringReplaceCall repl, DataFlow::Node old, string msg
 where
   (old = repl.getArgument(0) or old = repl.getRegExp()) and
   (
-    not repl.isGlobal() and
-    msg = "This replaces only the first occurrence of " + old + "." and
+    not repl.maybeGlobal() and
+    msg = "This replaces only the first occurrence of " + getPatternOrValueString(old) + "." and
     // only flag if this is likely to be a sanitizer or URL encoder or decoder
     exists(string m | m = getAMatchedString(old) |
       // sanitizer
@@ -172,10 +182,8 @@ where
     // don't flag replacements of certain characters with whitespace
     not whitelistedRemoval(repl)
     or
-    exists(DataFlow::RegExpLiteralNode rel |
-      isBackslashEscape(repl, rel) and
-      not allBackslashesEscaped(repl) and
-      msg = "This does not escape backslash characters in the input."
-    )
+    isBackslashEscape(repl, _) and
+    not allBackslashesEscaped(repl) and
+    msg = "This does not escape backslash characters in the input."
   )
 select repl.getCalleeNode(), msg

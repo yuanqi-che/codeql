@@ -4,6 +4,7 @@
  * own.
  */
 
+import semmle.javascript.filters.ClassifyFiles
 import javascript
 private import semmle.javascript.security.SensitiveActions
 
@@ -33,12 +34,14 @@ module HardcodedCredentials {
   }
 
   /**
-   * A subclass of `Sink` that includes every `CredentialsExpr`
+   * A subclass of `Sink` that includes every `CredentialsNode`
    * as a credentials sink.
    */
-  class DefaultCredentialsSink extends Sink, DataFlow::ValueNode {
-    override CredentialsExpr astNode;
+  class DefaultCredentialsSink extends Sink instanceof CredentialsNode {
+    override string getKind() { result = super.getCredentialsKind() }
 
-    override string getKind() { result = astNode.getCredentialsKind() }
+    DefaultCredentialsSink() {
+      not (super.getCredentialsKind() = "jwt key" and isTestFile(this.getFile()))
+    }
   }
 }

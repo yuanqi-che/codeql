@@ -4,13 +4,14 @@
  */
 
 import python
-private import semmle.python.pointsto.Base
+private import semmle.python.internal.CachedStages
 
 cached
 module SsaSource {
   /** Holds if `v` is used as the receiver in a method call. */
   cached
   predicate method_call_refinement(Variable v, ControlFlowNode use, CallNode call) {
+    Stages::AST::ref() and
     use = v.getAUse() and
     call.getFunction().(AttrNode).getObject() = use and
     not test_contains(_, call)
@@ -19,7 +20,12 @@ module SsaSource {
   /** Holds if `v` is defined by assignment at `defn` and given `value`. */
   cached
   predicate assignment_definition(Variable v, ControlFlowNode defn, ControlFlowNode value) {
-    defn.(NameNode).defines(v) and defn.(DefinitionNode).getValue() = value
+    defn.(NameNode).defines(v) and
+    defn.(DefinitionNode).getValue() = value and
+    // since parameter will be considered a DefinitionNode, if it has a default value,
+    // we need to exclude it here since it is already covered by parameter_definition
+    // (and points-to was unhappy that it was included in both)
+    not parameter_definition(v, defn)
   }
 
   /** Holds if `v` is defined by assignment of the captured exception. */
@@ -29,11 +35,40 @@ module SsaSource {
     exists(ExceptFlowNode ex | ex.getName() = defn)
   }
 
+  /** Holds if `v` is defined by assignment of the captured exception group. */
+  cached
+  predicate exception_group_capture(Variable v, NameNode defn) {
+    defn.defines(v) and
+    exists(ExceptGroupFlowNode ex | ex.getName() = defn)
+  }
+
   /** Holds if `v` is defined by a with statement. */
   cached
   predicate with_definition(Variable v, ControlFlowNode defn) {
     exists(With with, Name var |
       with.getOptionalVars() = var and
+      var.getAFlowNode() = defn
+    |
+      var = v.getAStore()
+    )
+  }
+
+  /** Holds if `v` is defined by a capture pattern. */
+  cached
+  predicate pattern_capture_definition(Variable v, ControlFlowNode defn) {
+    exists(MatchCapturePattern capture, Name var |
+      capture.getVariable() = var and
+      var.getAFlowNode() = defn
+    |
+      var = v.getAStore()
+    )
+  }
+
+  /** Holds if `v` is defined by as the alias of an as-pattern. */
+  cached
+  predicate pattern_alias_definition(Variable v, ControlFlowNode defn) {
+    exists(MatchAsPattern pattern, Name var |
+      pattern.getAlias() = var and
       var.getAFlowNode() = defn
     |
       var = v.getAStore()
@@ -51,13 +86,6 @@ module SsaSource {
     not exists(defn.(DefinitionNode).getValue()) and
     lhs.getElement(n) = defn and
     lhs.getBasicBlock().dominates(defn.getBasicBlock())
-  }
-
-  /** Holds if `v` is defined by a `for` statement, the definition being `defn` */
-  cached
-  predicate iteration_defined_variable(Variable v, ControlFlowNode defn, ControlFlowNode sequence) {
-    exists(ForNode for | for.iterates(defn, sequence)) and
-    defn.(NameNode).defines(v)
   }
 
   /** Holds if `v` is a parameter variable and `defn` is the CFG node for that parameter. */
@@ -127,7 +155,7 @@ module SsaSource {
     not test_contains(_, call)
   }
 
-  /** Holds if an attribute is deleted  at `def` and `use` is the use of `v` for that deletion */
+  /** Holds if an attribute is deleted at `def` and `use` is the use of `v` for that deletion */
   cached
   predicate attribute_deletion_refinement(Variable v, NameNode use, DeletionNode def) {
     use.uses(v) and

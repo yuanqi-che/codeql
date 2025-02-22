@@ -111,16 +111,28 @@ class IfExpr extends ConditionalExpr, TIfExpr {
   }
 }
 
-private class If extends IfExpr, TIf {
+private class IfReal extends IfExpr, TIfReal {
   private Ruby::If g;
 
-  If() { this = TIf(g) }
+  IfReal() { this = TIfReal(g) }
 
   final override Expr getCondition() { toGenerated(result) = g.getCondition() }
 
   final override Stmt getThen() { toGenerated(result) = g.getConsequence() }
 
   final override Stmt getElse() { toGenerated(result) = g.getAlternative() }
+
+  final override string toString() { result = "if ..." }
+}
+
+private class IfSynth extends IfExpr, TIfSynth {
+  IfSynth() { this = TIfSynth(_, _) }
+
+  final override Expr getCondition() { synthChild(this, 0, result) }
+
+  final override Stmt getThen() { synthChild(this, 1, result) }
+
+  final override Stmt getElse() { synthChild(this, 2, result) }
 
   final override string toString() { result = "if ..." }
 }
@@ -361,22 +373,16 @@ class CaseExpr extends ControlExpr instanceof CaseExprImpl {
   final Expr getValue() { result = super.getValue() }
 
   /**
-   * Gets the `n`th branch of this case expression, either a `WhenExpr`, an
+   * Gets the `n`th branch of this case expression, either a `WhenClause`, an
    * `InClause`, or a `StmtSequence`.
    */
-  final Expr getBranch(int n) { result = super.getBranch(n) }
+  final AstNode getBranch(int n) { result = super.getBranch(n) }
 
   /**
-   * Gets a branch of this case expression, either a `WhenExpr`, an
+   * Gets a branch of this case expression, either a `WhenClause`, an
    * `InClause`, or a `StmtSequence`.
    */
-  final Expr getABranch() { result = this.getBranch(_) }
-
-  /** Gets the `n`th `when` branch of this case expression. */
-  deprecated final WhenExpr getWhenBranch(int n) { result = this.getBranch(n) }
-
-  /** Gets a `when` branch of this case expression. */
-  deprecated final WhenExpr getAWhenBranch() { result = this.getABranch() }
+  final AstNode getABranch() { result = this.getBranch(_) }
 
   /** Gets the `else` branch of this case expression, if any. */
   final StmtSequence getElseBranch() { result = this.getABranch() }
@@ -409,12 +415,12 @@ class CaseExpr extends ControlExpr instanceof CaseExprImpl {
  * end
  * ```
  */
-class WhenExpr extends Expr, TWhenExpr {
+class WhenClause extends AstNode, TWhenClause {
   private Ruby::When g;
 
-  WhenExpr() { this = TWhenExpr(g) }
+  WhenClause() { this = TWhenClause(g) }
 
-  final override string getAPrimaryQlClass() { result = "WhenExpr" }
+  final override string getAPrimaryQlClass() { result = "WhenClause" }
 
   /** Gets the body of this case-when expression. */
   final Stmt getBody() { toGenerated(result) = g.getBody() }
@@ -461,15 +467,11 @@ class WhenExpr extends Expr, TWhenExpr {
  * end
  * ```
  */
-class InClause extends Expr, TInClause {
-  private Ruby::InClause g;
-
-  InClause() { this = TInClause(g) }
-
+class InClause extends AstNode instanceof InClauseImpl {
   final override string getAPrimaryQlClass() { result = "InClause" }
 
   /** Gets the body of this case-in expression. */
-  final Stmt getBody() { toGenerated(result) = g.getBody() }
+  final Stmt getBody() { result = super.getBody() }
 
   /**
    * Gets the pattern in this case-in expression. In the
@@ -481,7 +483,7 @@ class InClause extends Expr, TInClause {
    * end
    * ```
    */
-  final CasePattern getPattern() { toGenerated(result) = g.getPattern() }
+  final CasePattern getPattern() { result = super.getPattern() }
 
   /**
    * Gets the pattern guard condition in this case-in expression. In the
@@ -493,7 +495,7 @@ class InClause extends Expr, TInClause {
    * end
    * ```
    */
-  final Expr getCondition() { toGenerated(result) = g.getGuard().getAFieldOrChild() }
+  final Expr getCondition() { result = super.getCondition() }
 
   /**
    * Holds if the pattern guard in this case-in expression is an `if` condition. For example:
@@ -503,7 +505,7 @@ class InClause extends Expr, TInClause {
    * end
    * ```
    */
-  predicate hasIfCondition() { g.getGuard() instanceof Ruby::IfGuard }
+  predicate hasIfCondition() { super.hasIfCondition() }
 
   /**
    * Holds if the pattern guard in this case-in expression is an `unless` condition. For example:
@@ -513,18 +515,100 @@ class InClause extends Expr, TInClause {
    * end
    * ```
    */
-  predicate hasUnlessCondition() { g.getGuard() instanceof Ruby::UnlessGuard }
+  predicate hasUnlessCondition() { super.hasUnlessCondition() }
 
   final override string toString() { result = "in ... then ..." }
 
   final override AstNode getAChild(string pred) {
-    result = super.getAChild(pred)
+    result = AstNode.super.getAChild(pred)
     or
     pred = "getBody" and result = this.getBody()
     or
     pred = "getPattern" and result = this.getPattern()
     or
     pred = "getCondition" and result = this.getCondition()
+  }
+}
+
+/**
+ * A one-line pattern match using the `=>` operator. For example:
+ * ```rb
+ * foo => Point{ x:, y: }
+ * ```
+ */
+class MatchPattern extends Expr, TMatchPattern {
+  private Ruby::MatchPattern g;
+
+  MatchPattern() { this = TMatchPattern(g) }
+
+  final override string getAPrimaryQlClass() { result = "MatchPattern" }
+
+  /**
+   * Gets the expression being compared. For example, `foo` in the following example.
+   * ```rb
+   * foo => Point{ x:, y: }
+   * ```
+   */
+  final Expr getValue() { toGenerated(result) = g.getValue() }
+
+  /**
+   * Gets the pattern in this `=>` expression. In the
+   * following example, the pattern is `Point{ x:, y: }`.
+   * ```rb
+   * foo => Point{ x:, y: }
+   * ```
+   */
+  final CasePattern getPattern() { toGenerated(result) = g.getPattern() }
+
+  final override string toString() { result = "... => ..." }
+
+  final override AstNode getAChild(string pred) {
+    result = super.getAChild(pred)
+    or
+    pred = "getPattern" and result = this.getPattern()
+    or
+    pred = "getValue" and result = this.getValue()
+  }
+}
+
+/**
+ * A one-line pattern match using the `in` operator. For example:
+ * ```rb
+ * foo in Point{ x:, y: }
+ * ```
+ */
+class TestPattern extends Expr, TTestPattern {
+  private Ruby::TestPattern g;
+
+  TestPattern() { this = TTestPattern(g) }
+
+  final override string getAPrimaryQlClass() { result = "TestPattern" }
+
+  /**
+   * Gets the expression being compared. For example, `foo` in the following example.
+   * ```rb
+   * foo in Point{ x:, y: }
+   * ```
+   */
+  final Expr getValue() { toGenerated(result) = g.getValue() }
+
+  /**
+   * Gets the pattern in this `in` expression. In the
+   * following example, the pattern is `Point{ x:, y: }`.
+   * ```rb
+   * foo in Point{ x:, y: }
+   * ```
+   */
+  final CasePattern getPattern() { toGenerated(result) = g.getPattern() }
+
+  final override string toString() { result = "... in ..." }
+
+  final override AstNode getAChild(string pred) {
+    result = super.getAChild(pred)
+    or
+    pred = "getPattern" and result = this.getPattern()
+    or
+    pred = "getValue" and result = this.getValue()
   }
 }
 

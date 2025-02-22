@@ -1,5 +1,6 @@
 private import cpp
 import semmle.code.cpp.ir.implementation.raw.IR
+private import semmle.code.cpp.internal.ExtractorVersion
 private import semmle.code.cpp.ir.IRConfiguration
 private import semmle.code.cpp.ir.implementation.Opcode
 private import semmle.code.cpp.ir.implementation.internal.OperandTag
@@ -19,20 +20,45 @@ private import SideEffects
  * they were explicit nodes in the expression tree, rather than as implicit
  * nodes as in the regular AST representation.
  */
-private Element getRealParent(Expr expr) {
+Element getRealParent(Expr expr) {
   result = expr.getParentWithConversions()
   or
   result.(Destructor).getADestruction() = expr
+  or
+  result.(Expr).getAnImplicitDestructorCall() = expr
+  or
+  result.(Stmt).getAnImplicitDestructorCall() = expr
 }
 
-IRUserVariable getIRUserVariable(Function func, Variable var) {
+IRUserVariable getIRUserVariable(Declaration decl, Variable var) {
   result.getVariable() = var and
-  result.getEnclosingFunction() = func
+  result.getEnclosingFunction() = decl
 }
 
 IRTempVariable getIRTempVariable(Locatable ast, TempVariableTag tag) {
-  result.getAST() = ast and
+  result.getAst() = ast and
   result.getTag() = tag
+}
+
+/** Gets an operand of `op`. */
+private Expr getAnOperand(Operation op) { result = op.getAnOperand() }
+
+/**
+ * Gets the number of nested operands of `op`. For example,
+ * `getNumberOfNestedBinaryOperands((1 + 2) + 3))` is `3`.
+ */
+private int getNumberOfNestedBinaryOperands(Operation op) { result = count(getAnOperand*(op)) }
+
+/**
+ * Holds if `op` should not be translated to a `ConstantInstruction` as part of
+ * IR generation, even if the value of `op` is constant.
+ */
+private predicate ignoreConstantValue(Operation op) {
+  op instanceof BitwiseAndExpr
+  or
+  op instanceof BitwiseOrExpr
+  or
+  op instanceof BitwiseXorExpr
 }
 
 /**
@@ -40,7 +66,17 @@ IRTempVariable getIRTempVariable(Locatable ast, TempVariableTag tag) {
  * its value in the IR. This does not include address constants as we have no
  * means to express those as QL values.
  */
-predicate isIRConstant(Expr expr) { exists(expr.getValue()) }
+predicate isIRConstant(Expr expr) {
+  exists(expr.getValue()) and
+  // We avoid constant folding certain operations since it's often useful to
+  // mark one of those as a source in dataflow, and if the operation is
+  // constant folded it's not possible to mark its operands as a source (or
+  // sink).
+  // But to avoid creating an outrageous amount of IR from very large
+  // constant expressions we fall back to constant folding if the operation
+  // has more than 50 operands (i.e., 1 + 2 + 3 + 4 + ... + 50)
+  if ignoreConstantValue(expr) then getNumberOfNestedBinaryOperands(expr) > 50 else any()
+}
 
 // Pulled out for performance. See
 // https://github.com/github/codeql-coreql-team/issues/1044.
@@ -62,14 +98,6 @@ private predicate ignoreExprAndDescendants(Expr expr) {
   // constant value.
   isIRConstant(getRealParent(expr))
   or
-  // Only translate the initializer of a static local if it uses run-time data.
-  // Otherwise the initializer does not run in function scope.
-  exists(Initializer init, StaticStorageDurationVariable var |
-    init = var.getInitializer() and
-    not var.hasDynamicInitialization() and
-    expr = init.getExpr().getFullyConverted()
-  )
-  or
   // Ignore descendants of `__assume` expressions, since we translated these to `NoOp`.
   getRealParent(expr) instanceof AssumeExpr
   or
@@ -85,20 +113,28 @@ private predicate ignoreExprAndDescendants(Expr expr) {
     newExpr.getInitializer().getFullyConverted() = expr
   )
   or
+  exists(DeleteOrDeleteArrayExpr deleteExpr |
+    // Ignore the deallocator call, because we always synthesize it.
+    deleteExpr.getDeallocatorCall() = expr
+  )
+  or
   // Do not translate input/output variables in GNU asm statements
   //  getRealParent(expr) instanceof AsmStmt
   //  or
   ignoreExprAndDescendants(getRealParent(expr)) // recursive case
   or
-  // We do not yet translate destructors properly, so for now we ignore any
-  // custom deallocator call, if present.
-  exists(DeleteExpr deleteExpr | deleteExpr.getAllocatorCall() = expr)
-  or
-  exists(DeleteArrayExpr deleteArrayExpr | deleteArrayExpr.getAllocatorCall() = expr)
-  or
+  // va_start doesn't evaluate its argument, so we don't need to translate it.
   exists(BuiltInVarArgsStart vaStartExpr |
     vaStartExpr.getLastNamedParameter().getFullyConverted() = expr
   )
+  or
+  // The children of C11 _Generic expressions are just surface syntax.
+  exists(C11GenericExpr generic | generic.getAChild() = expr)
+  or
+  // Do not translate implicit destructor calls for unnamed temporary variables that are
+  // conditionally constructed (until we have a mechanism for calling these only when the
+  // temporary's constructor was run)
+  isConditionalTemporaryDestructorCall(expr)
 }
 
 /**
@@ -117,14 +153,8 @@ private predicate ignoreExprOnly(Expr expr) {
   // should not be translated.
   exists(NewOrNewArrayExpr new | expr = new.getAllocatorCall().getArgument(0))
   or
-  not translateFunction(expr.getEnclosingFunction())
-  or
-  // We do not yet translate destructors properly, so for now we ignore the
-  // destructor call. We do, however, translate the expression being
-  // destructed, and that expression can be a child of the destructor call.
-  exists(DeleteExpr deleteExpr | deleteExpr.getDestructorCall() = expr)
-  or
-  exists(DeleteArrayExpr deleteArrayExpr | deleteArrayExpr.getDestructorCall() = expr)
+  not translateFunction(getEnclosingFunction(expr)) and
+  not Raw::varHasIRFunc(getEnclosingVariable(expr))
 }
 
 /**
@@ -136,17 +166,24 @@ private predicate ignoreExpr(Expr expr) {
 }
 
 /**
+ * Holds if the side effects of `expr` should be ignored for the purposes of IR generation.
+ *
+ * In cases involving `constexpr`, a call can wind up as a constant expression. `ignoreExpr()` will
+ * not hold for such a call, since we do need to translate the call (as a constant), but we need to
+ * ignore all of the side effects of that call, since we will not actually be generating a `Call`
+ * instruction.
+ */
+private predicate ignoreSideEffects(Expr expr) {
+  ignoreExpr(expr)
+  or
+  isIRConstant(expr)
+}
+
+/**
  * Holds if `func` contains an AST that cannot be translated into IR. This is mostly used to work
  * around extractor bugs. Once the relevant extractor bugs are fixed, this predicate can be removed.
  */
 private predicate isInvalidFunction(Function func) {
-  exists(Literal literal |
-    // Constructor field inits within a compiler-generated copy constructor have a source expression
-    // that is a `Literal` with no value.
-    literal = func.(Constructor).getAnInitializer().(ConstructorFieldInit).getExpr() and
-    not exists(literal.getValue())
-  )
-  or
   exists(ThisExpr thisExpr |
     // An instantiation of a member function template is not treated as a `MemberFunction` if it has
     // only non-type template arguments.
@@ -159,6 +196,8 @@ private predicate isInvalidFunction(Function func) {
     expr.getEnclosingFunction() = func and
     not exists(expr.getType())
   )
+  or
+  count(func.getEntryPoint().getLocation()) > 1
 }
 
 /**
@@ -190,10 +229,7 @@ private predicate isNativeCondition(Expr expr) {
  * depending on context.
  */
 private predicate isFlexibleCondition(Expr expr) {
-  (
-    expr instanceof ParenthesisExpr or
-    expr instanceof NotExpr
-  ) and
+  expr instanceof ParenthesisExpr and
   usedAsCondition(expr) and
   not isIRConstant(expr)
 }
@@ -212,20 +248,53 @@ private predicate usedAsCondition(Expr expr) {
   or
   exists(IfStmt ifStmt | ifStmt.getCondition().getFullyConverted() = expr)
   or
+  exists(ConstexprIfStmt ifStmt | ifStmt.getCondition().getFullyConverted() = expr)
+  or
   exists(ConditionalExpr condExpr |
     // The two-operand form of `ConditionalExpr` treats its condition as a value, since it needs to
     // be reused as a value if the condition is true.
     condExpr.getCondition().getFullyConverted() = expr and not condExpr.isTwoOperand()
   )
   or
-  exists(NotExpr notExpr |
-    notExpr.getOperand().getFullyConverted() = expr and
-    usedAsCondition(notExpr)
-  )
-  or
   exists(ParenthesisExpr paren |
     paren.getExpr() = expr and
     usedAsCondition(paren)
+  )
+}
+
+private predicate hasThrowingChild(Expr e) {
+  e = any(ThrowExpr throw).getFullyConverted()
+  or
+  exists(Expr child |
+    e = getRealParent(child) and
+    hasThrowingChild(child)
+  )
+}
+
+private predicate isInConditionalEvaluation(Expr e) {
+  exists(ConditionalExpr cond |
+    e = cond.getThen().getFullyConverted() and not cond.isTwoOperand()
+    or
+    e = cond.getElse().getFullyConverted()
+    or
+    // If one of the operands throws then the temporaries constructed in either
+    // branch will also be attached to the ternary expression. We suppress
+    // those destructor calls as well.
+    hasThrowingChild([cond.getThen(), cond.getElse()]) and
+    e = cond.getFullyConverted()
+  )
+  or
+  e = any(LogicalAndExpr lae).getRightOperand().getFullyConverted()
+  or
+  e = any(LogicalOrExpr loe).getRightOperand().getFullyConverted()
+  or
+  isInConditionalEvaluation(getRealParent(e))
+}
+
+private predicate isConditionalTemporaryDestructorCall(DestructorCall dc) {
+  exists(TemporaryObjectExpr temp |
+    temp = dc.getQualifier().(ReuseExpr).getReusedExpr() and
+    isInConditionalEvaluation(temp)
   )
 }
 
@@ -362,6 +431,15 @@ predicate ignoreLoad(Expr expr) {
     or
     expr instanceof FunctionAccess
     or
+    // The load is duplicated from the operand.
+    isExtractorFrontendVersion65OrHigher() and expr instanceof ParenthesisExpr
+    or
+    // The load is duplicated from the right operand.
+    isExtractorFrontendVersion65OrHigher() and expr instanceof CommaExpr
+    or
+    // The load is duplicated from the chosen expression.
+    expr instanceof C11GenericExpr
+    or
     expr.(PointerDereferenceExpr).getOperand().getFullyConverted().getType().getUnspecifiedType()
       instanceof FunctionPointerType
     or
@@ -416,7 +494,9 @@ predicate hasTranslatedLoad(Expr expr) {
   not ignoreExpr(expr) and
   not isNativeCondition(expr) and
   not isFlexibleCondition(expr) and
-  not ignoreLoad(expr)
+  not ignoreLoad(expr) and
+  // don't insert a load since we'll just substitute the constant value.
+  not isIRConstant(expr)
 }
 
 /**
@@ -429,25 +509,130 @@ predicate hasTranslatedSyntheticTemporaryObject(Expr expr) {
   not expr.hasLValueToRValueConversion()
 }
 
+class StaticInitializedStaticLocalVariable extends StaticLocalVariable {
+  StaticInitializedStaticLocalVariable() {
+    this.hasInitializer() and
+    not this.hasDynamicInitialization()
+  }
+}
+
+class RuntimeInitializedStaticLocalVariable extends StaticLocalVariable {
+  RuntimeInitializedStaticLocalVariable() { this.hasDynamicInitialization() }
+}
+
 /**
  * Holds if the specified `DeclarationEntry` needs an IR translation. An IR translation is only
  * necessary for automatic local variables, or for static local variables with dynamic
  * initialization.
  */
-private predicate translateDeclarationEntry(DeclarationEntry entry) {
+private predicate translateDeclarationEntry(IRDeclarationEntry entry) {
   exists(DeclStmt declStmt, LocalVariable var |
     translateStmt(declStmt) and
-    declStmt.getADeclarationEntry() = entry and
+    declStmt = entry.getStmt() and
     // Only declarations of local variables need to be translated to IR.
     var = entry.getDeclaration() and
     (
       not var.isStatic()
       or
       // Ignore static variables unless they have a dynamic initializer.
-      var.(StaticLocalVariable).hasDynamicInitialization()
+      var instanceof RuntimeInitializedStaticLocalVariable
     )
   )
 }
+
+private module IRDeclarationEntries {
+  private newtype TIRDeclarationEntry =
+    TPresentDeclarationEntry(DeclarationEntry entry) or
+    TMissingDeclarationEntry(DeclStmt stmt, Declaration d, int index) {
+      not exists(stmt.getDeclarationEntry(index)) and
+      stmt.getDeclaration(index) = d
+    }
+
+  /**
+   * An entity that represents a declaration entry in the database.
+   *
+   * This class exists to work around the fact that `DeclStmt`s in some cases
+   * do not have `DeclarationEntry`s in older databases.
+   *
+   * So instead, the IR works with `IRDeclarationEntry`s that synthesize missing
+   * `DeclarationEntry`s when there is no result for `DeclStmt::getDeclarationEntry`.
+   */
+  abstract class IRDeclarationEntry extends TIRDeclarationEntry {
+    /** Gets a string representation of this `IRDeclarationEntry`. */
+    abstract string toString();
+
+    /** Gets the `DeclStmt` that this `IRDeclarationEntry` belongs to. */
+    abstract DeclStmt getStmt();
+
+    /** Gets the `Declaration` declared by this `IRDeclarationEntry`. */
+    abstract Declaration getDeclaration();
+
+    /** Gets the AST represented by this `IRDeclarationEntry`. */
+    abstract Locatable getAst();
+
+    /**
+     * Holds if this `IRDeclarationEntry` is the `index`'th entry
+     * declared by the enclosing `DeclStmt`.
+     */
+    abstract predicate hasIndex(int index);
+  }
+
+  /** A `IRDeclarationEntry` for an existing `DeclarationEntry`. */
+  private class PresentDeclarationEntry extends IRDeclarationEntry, TPresentDeclarationEntry {
+    DeclarationEntry entry;
+
+    PresentDeclarationEntry() { this = TPresentDeclarationEntry(entry) }
+
+    override string toString() { result = entry.toString() }
+
+    override DeclStmt getStmt() { result.getADeclarationEntry() = entry }
+
+    override Declaration getDeclaration() { result = entry.getDeclaration() }
+
+    override Locatable getAst() { result = entry }
+
+    override predicate hasIndex(int index) { this.getStmt().getDeclarationEntry(index) = entry }
+  }
+
+  /**
+   * A synthesized `DeclarationEntry` that is created when a `DeclStmt` is missing a
+   * result for `DeclStmt::getDeclarationEntry`
+   */
+  private class MissingDeclarationEntry extends IRDeclarationEntry, TMissingDeclarationEntry {
+    DeclStmt stmt;
+    Declaration d;
+    int index;
+
+    MissingDeclarationEntry() { this = TMissingDeclarationEntry(stmt, d, index) }
+
+    override string toString() { result = "missing declaration of " + d.getName() }
+
+    override DeclStmt getStmt() { result = stmt }
+
+    override Declaration getDeclaration() { result = d }
+
+    override Locatable getAst() { result = stmt }
+
+    override predicate hasIndex(int idx) { idx = index }
+  }
+
+  /** A `IRDeclarationEntry` that represents an entry for a `Variable`. */
+  class IRVariableDeclarationEntry instanceof IRDeclarationEntry {
+    Variable v;
+
+    IRVariableDeclarationEntry() { super.getDeclaration() = v }
+
+    Variable getDeclaration() { result = v }
+
+    string toString() { result = super.toString() }
+
+    Locatable getAst() { result = super.getAst() }
+
+    DeclStmt getStmt() { result = super.getStmt() }
+  }
+}
+
+import IRDeclarationEntries
 
 newtype TTranslatedElement =
   // An expression that is not being consumed as a condition
@@ -500,32 +685,44 @@ newtype TTranslatedElement =
   TTranslatedInitialization(Expr expr) {
     not ignoreExpr(expr) and
     (
-      exists(Initializer init | init.getExpr().getFullyConverted() = expr) or
-      exists(ClassAggregateLiteral initList | initList.getFieldExpr(_).getFullyConverted() = expr) or
+      exists(Initializer init | init.getExpr().getFullyConverted() = expr)
+      or
+      exists(ClassAggregateLiteral initList | initList.getAFieldExpr(_).getFullyConverted() = expr)
+      or
       exists(ArrayOrVectorAggregateLiteral initList |
-        initList.getElementExpr(_).getFullyConverted() = expr
-      ) or
-      exists(ReturnStmt returnStmt | returnStmt.getExpr().getFullyConverted() = expr) or
-      exists(ConstructorFieldInit fieldInit | fieldInit.getExpr().getFullyConverted() = expr) or
-      exists(NewExpr newExpr | newExpr.getInitializer().getFullyConverted() = expr) or
-      exists(ThrowExpr throw | throw.getExpr().getFullyConverted() = expr) or
-      exists(TemporaryObjectExpr temp | temp.getExpr() = expr) or
+        initList.getAnElementExpr(_).getFullyConverted() = expr
+      )
+      or
+      exists(ReturnStmt returnStmt |
+        returnStmt.getExpr().getFullyConverted() = expr and
+        hasReturnValue(returnStmt.getEnclosingFunction())
+      )
+      or
+      exists(ConstructorFieldInit fieldInit | fieldInit.getExpr().getFullyConverted() = expr)
+      or
+      exists(NewExpr newExpr | newExpr.getInitializer().getFullyConverted() = expr)
+      or
+      exists(ThrowExpr throw | throw.getExpr().getFullyConverted() = expr)
+      or
+      exists(TemporaryObjectExpr temp | temp.getExpr() = expr)
+      or
       exists(LambdaExpression lambda | lambda.getInitializer().getFullyConverted() = expr)
     )
   } or
   // The initialization of a field via a member of an initializer list.
-  TTranslatedExplicitFieldInitialization(Expr ast, Field field, Expr expr) {
+  TTranslatedExplicitFieldInitialization(Expr ast, Field field, Expr expr, int position) {
     exists(ClassAggregateLiteral initList |
       not ignoreExpr(initList) and
       ast = initList and
-      expr = initList.getFieldExpr(field).getFullyConverted()
+      expr = initList.getFieldExpr(field, position).getFullyConverted()
     )
     or
     exists(ConstructorFieldInit init |
       not ignoreExpr(init) and
       ast = init and
       field = init.getTarget() and
-      expr = init.getExpr().getFullyConverted()
+      expr = init.getExpr().getFullyConverted() and
+      position = -1
     )
   } or
   // The value initialization of a field due to an omitted member of an
@@ -538,9 +735,11 @@ newtype TTranslatedElement =
     )
   } or
   // The initialization of an array element via a member of an initializer list.
-  TTranslatedExplicitElementInitialization(ArrayOrVectorAggregateLiteral initList, int elementIndex) {
+  TTranslatedExplicitElementInitialization(
+    ArrayOrVectorAggregateLiteral initList, int elementIndex, int position
+  ) {
     not ignoreExpr(initList) and
-    exists(initList.getElementExpr(elementIndex))
+    exists(initList.getElementExpr(elementIndex, position))
   } or
   // The value initialization of a range of array elements that were omitted
   // from an initializer list.
@@ -553,6 +752,13 @@ newtype TTranslatedElement =
   } or
   // The initialization of a base class from within a constructor.
   TTranslatedConstructorBaseInit(ConstructorBaseInit init) { not ignoreExpr(init) } or
+  // Workaround for a case where no base constructor is generated but a targetless base
+  // constructor call is present.
+  TTranslatedConstructorBareInit(ConstructorInit init) {
+    not ignoreExpr(init) and
+    not init instanceof ConstructorBaseInit and
+    not init instanceof ConstructorFieldInit
+  } or
   // The destruction of a base class from within a destructor.
   TTranslatedDestructorBaseDestruction(DestructorBaseDestruction destruction) {
     not ignoreExpr(destruction)
@@ -563,6 +769,10 @@ newtype TTranslatedElement =
   } or
   // A statement
   TTranslatedStmt(Stmt stmt) { translateStmt(stmt) } or
+  // The `__except` block of a `__try __except` statement
+  TTranslatedMicrosoftTryExceptHandler(MicrosoftTryExceptStmt stmt) or
+  // The `__finally` block of a `__try __finally` statement
+  TTranslatedMicrosoftTryFinallyHandler(MicrosoftTryFinallyStmt stmt) or
   // A function
   TTranslatedFunction(Function func) { translateFunction(func) } or
   // A constructor init list
@@ -597,22 +807,12 @@ newtype TTranslatedElement =
     )
   } or
   // A local declaration
-  TTranslatedDeclarationEntry(DeclarationEntry entry) { translateDeclarationEntry(entry) } or
+  TTranslatedDeclarationEntry(IRDeclarationEntry entry) { translateDeclarationEntry(entry) } or
   // The dynamic initialization of a static local variable. This is a separate object from the
   // declaration entry.
-  TTranslatedStaticLocalVariableInitialization(DeclarationEntry entry) {
+  TTranslatedStaticLocalVariableInitialization(IRDeclarationEntry entry) {
     translateDeclarationEntry(entry) and
     entry.getDeclaration() instanceof StaticLocalVariable
-  } or
-  // A compiler-generated variable to implement a range-based for loop. These don't have a
-  // `DeclarationEntry` in the database, so we have to go by the `Variable` itself.
-  TTranslatedRangeBasedForVariableDeclaration(RangeBasedForStmt forStmt, LocalVariable var) {
-    translateStmt(forStmt) and
-    (
-      var = forStmt.getRangeVariable() or
-      var = forStmt.getBeginEndDeclaration().getADeclaration() or
-      var = forStmt.getVariable()
-    )
   } or
   // An allocator call in a `new` or `new[]` expression
   TTranslatedAllocatorCall(NewOrNewArrayExpr newExpr) { not ignoreExpr(newExpr) } or
@@ -621,32 +821,54 @@ newtype TTranslatedElement =
   // The declaration/initialization part of a `ConditionDeclExpr`
   TTranslatedConditionDecl(ConditionDeclExpr expr) { not ignoreExpr(expr) } or
   // The side effects of a `Call`
-  TTranslatedCallSideEffects(Call expr) {
-    // Exclude allocations such as `malloc` (which happen to also be function calls).
-    // Both `TranslatedCallSideEffects` and `TranslatedAllocationSideEffects` generate
-    // the same side effects for its children as they both extend the `TranslatedSideEffects`
-    // class.
-    // Note: We can separate allocation side effects and call side effects into two
-    // translated elements as no call can be both a `ConstructorCall` and an `AllocationExpr`.
-    not expr instanceof AllocationExpr and
-    (
-      exists(TTranslatedArgumentSideEffect(expr, _, _, _)) or
-      expr instanceof ConstructorCall
+  TTranslatedCallSideEffects(CallOrAllocationExpr expr) {
+    not ignoreExpr(expr) and
+    not ignoreSideEffects(expr)
+  } or
+  // The non-argument-specific side effect of a `Call`
+  TTranslatedCallSideEffect(Expr expr, SideEffectOpcode opcode) {
+    not ignoreExpr(expr) and
+    not ignoreSideEffects(expr) and
+    opcode = getCallSideEffectOpcode(expr)
+  } or
+  // The set of destructors to invoke after a `throw`. These need to be special
+  // cased because the edge kind following a throw is an `ExceptionEdge`, and
+  // we need to make sure that the edge kind is still an `ExceptionEdge` after
+  // all the destructors have run.
+  TTranslatedDestructorsAfterThrow(ThrowExpr throw) {
+    exists(DestructorCall dc |
+      dc = throw.getAnImplicitDestructorCall() and
+      not ignoreExpr(dc)
     )
   } or
-  // The side effects of an allocation, i.e. `new`, `new[]` or `malloc`
-  TTranslatedAllocationSideEffects(AllocationExpr expr) { not ignoreExpr(expr) } or
+  // The set of destructors to invoke after a handler for a `try` statement. These
+  // need to be special cased because the destructors need to run following an
+  // `ExceptionEdge`, but not following a `GotoEdge` edge.
+  TTranslatedDestructorsAfterHandler(Handler handler) {
+    exists(handler.getAnImplicitDestructorCall())
+  } or
   // A precise side effect of an argument to a `Call`
-  TTranslatedArgumentSideEffect(Call call, Expr expr, int n, SideEffectOpcode opcode) {
+  TTranslatedArgumentExprSideEffect(Call call, Expr expr, int n, SideEffectOpcode opcode) {
     not ignoreExpr(expr) and
-    not ignoreExpr(call) and
+    not ignoreSideEffects(call) and
     (
       n >= 0 and expr = call.getArgument(n).getFullyConverted()
       or
       n = -1 and expr = call.getQualifier().getFullyConverted()
     ) and
     opcode = getASideEffectOpcode(call, n)
-  }
+  } or
+  // Constructor calls lack a qualifier (`this`) expression, so we need to handle the side effects
+  // on `*this` without an `Expr`.
+  TTranslatedStructorQualifierSideEffect(Call call, SideEffectOpcode opcode) {
+    not ignoreExpr(call) and
+    not ignoreSideEffects(call) and
+    call instanceof ConstructorCall and
+    opcode = getASideEffectOpcode(call, -1)
+  } or
+  // The side effect that initializes newly-allocated memory.
+  TTranslatedAllocationSideEffect(AllocationExpr expr) { not ignoreSideEffects(expr) } or
+  TTranslatedStaticStorageDurationVarInit(Variable var) { Raw::varHasIRFunc(var) }
 
 /**
  * Gets the index of the first explicitly initialized element in `initList`
@@ -676,7 +898,7 @@ private int getNextExplicitlyInitializedElementAfter(
   ArrayOrVectorAggregateLiteral initList, int afterElementIndex
 ) {
   isFirstValueInitializedElementInRange(initList, afterElementIndex) and
-  result = min(int i | exists(initList.getElementExpr(i)) and i > afterElementIndex)
+  result = min(int i | exists(initList.getAnElementExpr(i)) and i > afterElementIndex)
 }
 
 /**
@@ -689,7 +911,7 @@ private predicate isFirstValueInitializedElementInRange(
   initList.isValueInitialized(elementIndex) and
   (
     elementIndex = 0 or
-    exists(initList.getElementExpr(elementIndex - 1))
+    exists(initList.getAnElementExpr(elementIndex - 1))
   )
 }
 
@@ -707,17 +929,21 @@ abstract class TranslatedElement extends TTranslatedElement {
   /**
    * Gets the AST node being translated.
    */
-  abstract Locatable getAST();
+  abstract Locatable getAst();
+
+  /** Gets the location of this element. */
+  Location getLocation() { result = this.getAst().getLocation() }
 
   /**
-   * Get the first instruction to be executed in the evaluation of this element.
+   * Get the first instruction to be executed in the evaluation of this
+   * element when the edge kind is `kind`.
    */
-  abstract Instruction getFirstInstruction();
+  abstract Instruction getFirstInstruction(EdgeKind kind);
 
   /**
    * Get the immediate child elements of this element.
    */
-  final TranslatedElement getAChild() { result = getChild(_) }
+  final TranslatedElement getAChild() { result = this.getChild(_) }
 
   /**
    * Gets the immediate child element of this element. The `id` is unique
@@ -730,25 +956,46 @@ abstract class TranslatedElement extends TTranslatedElement {
    * Gets the an identifier string for the element. This id is unique within
    * the scope of the element's function.
    */
-  final int getId() { result = getUniqueId() }
+  final int getId() { result = this.getUniqueId() }
 
   private TranslatedElement getChildByRank(int rankIndex) {
     result =
-      rank[rankIndex + 1](TranslatedElement child, int id | child = getChild(id) | child order by id)
+      rank[rankIndex + 1](TranslatedElement child, int id |
+        child = this.getChild(id)
+      |
+        child order by id
+      )
   }
 
   language[monotonicAggregates]
   private int getDescendantCount() {
     result =
-      1 + sum(TranslatedElement child | child = getChildByRank(_) | child.getDescendantCount())
+      1 + sum(TranslatedElement child | child = this.getChildByRank(_) | child.getDescendantCount())
   }
 
+  /**
+   * Holds if this element has implicit destructor calls that should follow it.
+   */
+  predicate hasAnImplicitDestructorCall() { none() }
+
+  /**
+   * Gets the child index of the first destructor call that should be executed after this `TranslatedElement`
+   */
+  int getFirstDestructorCallIndex() { none() }
+
+  /**
+   * Holds if this `TranslatedElement` includes any destructor calls that must be performed after
+   * it in its `getChildSuccessorInternal`, `getInstructionSuccessorInternal`, and
+   * `getALastInstructionInternal` relations, rather than needing them inserted.
+   */
+  predicate handlesDestructorsExplicitly() { none() }
+
   private int getUniqueId() {
-    if not exists(getParent())
+    if not exists(this.getParent())
     then result = 0
     else
       exists(TranslatedElement parent |
-        parent = getParent() and
+        parent = this.getParent() and
         if this = parent.getChildByRank(0)
         then result = 1 + parent.getUniqueId()
         else
@@ -773,28 +1020,95 @@ abstract class TranslatedElement extends TTranslatedElement {
   /**
    * Gets the `Function` that contains this element.
    */
-  abstract Function getFunction();
+  abstract Declaration getFunction();
+
+  /**
+   * Gets the successor instruction of the instruction that was generated by
+   * this element for tag `tag`. The successor edge kind is specified by `kind`.
+   * This predicate does not usually include destructors, which are inserted as
+   * part of `getInstructionSuccessor` unless `handlesDestructorsExplicitly`
+   * holds.
+   */
+  abstract Instruction getInstructionSuccessorInternal(InstructionTag tag, EdgeKind kind);
 
   /**
    * Gets the successor instruction of the instruction that was generated by
    * this element for tag `tag`. The successor edge kind is specified by `kind`.
    */
-  abstract Instruction getInstructionSuccessor(InstructionTag tag, EdgeKind kind);
+  final Instruction getInstructionSuccessor(InstructionTag tag, EdgeKind kind) {
+    if
+      this.hasAnImplicitDestructorCall() and
+      this.getInstruction(tag) = this.getALastInstructionInternal() and
+      not this.handlesDestructorsExplicitly()
+    then
+      result = this.getChild(this.getFirstDestructorCallIndex()).getFirstInstruction(kind) and
+      kind instanceof GotoEdge
+    else result = this.getInstructionSuccessorInternal(tag, kind)
+  }
+
+  /**
+   * Gets an instruction within this `TranslatedElement` (including its transitive children) which
+   * will be followed by an instruction outside the `TranslatedElement`.
+   */
+  final Instruction getALastInstruction() {
+    if this.hasAnImplicitDestructorCall() and not this.handlesDestructorsExplicitly()
+    then result = this.getChild(max(int n | exists(this.getChild(n)))).getALastInstruction() // last destructor
+    else result = this.getALastInstructionInternal()
+  }
+
+  /**
+   * Gets an instruction within this `TranslatedElement` (including its transitive children) which
+   * will be followed by an instruction outside the `TranslatedElement`.
+   * This predicate does not usually include destructors, which are inserted as
+   * part of `getALastInstruction` unless `handlesDestructorsExplicitly` holds.
+   */
+  abstract Instruction getALastInstructionInternal();
+
+  TranslatedElement getLastChild() { none() }
 
   /**
    * Gets the successor instruction to which control should flow after the
-   * child element specified by `child` has finished execution.
+   * child element specified by `child` has finished execution. The successor
+   * edge kind is specified by `kind`.
+   * This predicate does not usually include destructors, which are inserted as
+   * part of `getChildSuccessor` unless `handlesDestructorsExplicitly` holds.
    */
-  abstract Instruction getChildSuccessor(TranslatedElement child);
+  Instruction getChildSuccessorInternal(TranslatedElement child, EdgeKind kind) { none() }
+
+  /**
+   * Gets the successor instruction to which control should flow after the
+   * child element specified by `child` has finished execution. The successor
+   * edge kind is specified by `kind`.
+   */
+  final Instruction getChildSuccessor(TranslatedElement child, EdgeKind kind) {
+    (
+      if
+        // this is the last child and we need to handle destructors for it
+        this.hasAnImplicitDestructorCall() and
+        not this.handlesDestructorsExplicitly() and
+        child = this.getLastChild()
+      then result = this.getChild(this.getFirstDestructorCallIndex()).getFirstInstruction(kind)
+      else result = this.getChildSuccessorInternal(child, kind)
+    )
+    or
+    not this.handlesDestructorsExplicitly() and
+    exists(int id |
+      id >= this.getFirstDestructorCallIndex() and
+      child = this.getChild(id) and
+      if id = max(int n | exists(this.getChild(n)))
+      then result = this.getParent().getChildSuccessor(this, kind)
+      else result = this.getChild(id + 1).getFirstInstruction(kind)
+    )
+  }
 
   /**
    * Gets the instruction to which control should flow if an exception is thrown
    * within this element. This will generally return first `catch` block of the
    * nearest enclosing `try`, or the `Unwind` instruction for the function if
-   * there is no enclosing `try`.
+   * there is no enclosing `try`. The successor edge kind is specified by `kind`.
    */
-  Instruction getExceptionSuccessorInstruction() {
-    result = getParent().getExceptionSuccessorInstruction()
+  Instruction getExceptionSuccessorInstruction(EdgeKind kind) {
+    result = this.getParent().getExceptionSuccessorInstruction(kind)
   }
 
   /**
@@ -906,20 +1220,31 @@ abstract class TranslatedElement extends TTranslatedElement {
    */
   final IRTempVariable getTempVariable(TempVariableTag tag) {
     exists(Locatable ast |
-      result.getAST() = ast and
+      result.getAst() = ast and
       result.getTag() = tag and
-      hasTempVariableAndAST(tag, ast)
+      this.hasTempVariableAndAst(tag, ast)
     )
   }
 
   pragma[noinline]
-  private predicate hasTempVariableAndAST(TempVariableTag tag, Locatable ast) {
-    hasTempVariable(tag, _) and
-    ast = getAST()
+  private predicate hasTempVariableAndAst(TempVariableTag tag, Locatable ast) {
+    this.hasTempVariable(tag, _) and
+    ast = this.getAst()
   }
 
   /**
    * Gets the parent element of this element.
    */
   final TranslatedElement getParent() { result.getAChild() = this }
+}
+
+/**
+ * The IR translation of a root element, either a function or a global variable.
+ */
+abstract class TranslatedRootElement extends TranslatedElement {
+  TranslatedRootElement() {
+    this instanceof TTranslatedFunction
+    or
+    this instanceof TTranslatedStaticStorageDurationVarInit
+  }
 }

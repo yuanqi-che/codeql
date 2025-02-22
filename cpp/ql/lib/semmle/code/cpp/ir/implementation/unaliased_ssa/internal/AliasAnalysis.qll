@@ -106,8 +106,7 @@ private predicate operandEscapesDomain(Operand operand) {
   not isArgumentForParameter(_, operand, _) and
   not isOnlyEscapesViaReturnArgument(operand) and
   not operand.getUse() instanceof ReturnValueInstruction and
-  not operand.getUse() instanceof ReturnIndirectionInstruction and
-  not operand instanceof PhiInputOperand
+  not operand.getUse() instanceof ReturnIndirectionInstruction
 }
 
 /**
@@ -191,6 +190,11 @@ private predicate operandIsPropagated(Operand operand, IntValue bitOffset, Instr
     // A copy propagates the source value.
     operand = instr.(CopyInstruction).getSourceValueOperand() and bitOffset = 0
   )
+  or
+  operand = instr.(PhiInstruction).getAnInputOperand() and
+  // Using `unknown` ensures termination since we cannot keep incrementing a bit offset
+  // through the back edge of a loop (or through recursion).
+  bitOffset = Ints::unknown()
 }
 
 private predicate operandEscapesNonReturn(Operand operand) {
@@ -211,9 +215,6 @@ private predicate operandEscapesNonReturn(Operand operand) {
   )
   or
   isOnlyEscapesViaReturnArgument(operand) and resultEscapesNonReturn(operand.getUse())
-  or
-  operand instanceof PhiInputOperand and
-  resultEscapesNonReturn(operand.getUse())
   or
   operandEscapesDomain(operand)
 }
@@ -236,9 +237,6 @@ private predicate operandMayReachReturn(Operand operand) {
   operand.getUse() instanceof ReturnValueInstruction
   or
   isOnlyEscapesViaReturnArgument(operand) and resultMayReachReturn(operand.getUse())
-  or
-  operand instanceof PhiInputOperand and
-  resultMayReachReturn(operand.getUse())
 }
 
 private predicate operandReturned(Operand operand, IntValue bitOffset) {
@@ -266,6 +264,20 @@ private predicate operandReturned(Operand operand, IntValue bitOffset) {
   bitOffset = Ints::unknown()
 }
 
+pragma[nomagic]
+private predicate initializeParameterInstructionHasVariable(
+  IRVariable var, InitializeParameterInstruction init
+) {
+  init.getIRVariable() = var
+}
+
+private predicate instructionInitializesThisInFunction(
+  Language::Function f, InitializeParameterInstruction init
+) {
+  initializeParameterInstructionHasVariable(any(IRThisVariable var), pragma[only_bind_into](init)) and
+  init.getEnclosingFunction() = f
+}
+
 private predicate isArgumentForParameter(
   CallInstruction ci, Operand operand, InitializeParameterInstruction init
 ) {
@@ -275,8 +287,7 @@ private predicate isArgumentForParameter(
     (
       init.getParameter() = f.getParameter(operand.(PositionalArgumentOperand).getIndex())
       or
-      init.getIRVariable() instanceof IRThisVariable and
-      unique( | | init.getEnclosingFunction()) = f and
+      instructionInitializesThisInFunction(f, init) and
       operand instanceof ThisArgumentOperand
     ) and
     not Language::isFunctionVirtual(f) and
@@ -327,6 +338,56 @@ private predicate resultEscapesNonReturn(Instruction instr) {
   not instr.isResultModeled()
 }
 
+/** Holds if `operand` may (transitively) flow to an `AddressOperand`. */
+private predicate consumedAsAddressOperand(Operand operand) {
+  operand instanceof AddressOperand
+  or
+  exists(Operand address |
+    consumedAsAddressOperand(address) and
+    operandIsPropagated(operand, _, address.getDef())
+  )
+}
+
+/**
+ * Holds if `operand` may originate from a base instruction of an allocation,
+ * and that operand may transitively flow to an `AddressOperand`.
+ */
+private predicate propagatedFromAllocationBase(Operand operand, Configuration::Allocation allocation) {
+  consumedAsAddressOperand(operand) and
+  (
+    not exists(Configuration::getOldAllocation(allocation)) and
+    operand.getDef() = allocation.getABaseInstruction()
+    or
+    exists(Operand address |
+      operandIsPropagated(address, _, operand.getDef()) and
+      propagatedFromAllocationBase(address, allocation)
+    )
+  )
+}
+
+private predicate propagatedFromNonAllocationBase(Operand operand) {
+  exists(Instruction def |
+    def = operand.getDef() and
+    not operandIsPropagated(_, _, def) and
+    not def = any(Configuration::Allocation allocation).getABaseInstruction()
+  )
+  or
+  exists(Operand address |
+    operandIsPropagated(address, _, operand.getDef()) and
+    propagatedFromNonAllocationBase(address)
+  )
+}
+
+/**
+ * Holds if we cannot see all producers of an operand for which allocation also flows into.
+ */
+private predicate operandConsumesEscaped(Configuration::Allocation allocation) {
+  exists(AddressOperand address |
+    propagatedFromAllocationBase(address, allocation) and
+    propagatedFromNonAllocationBase(address)
+  )
+}
+
 /**
  * Holds if the address of `allocation` escapes outside the domain of the analysis. This can occur
  * either because the allocation's address is taken within the function and escapes, or because the
@@ -335,12 +396,14 @@ private predicate resultEscapesNonReturn(Instruction instr) {
 predicate allocationEscapes(Configuration::Allocation allocation) {
   allocation.alwaysEscapes()
   or
-  exists(IREscapeAnalysisConfiguration config |
-    config.useSoundEscapeAnalysis() and resultEscapesNonReturn(allocation.getABaseInstruction())
+  exists(IREscapeAnalysisConfiguration config | config.useSoundEscapeAnalysis() |
+    resultEscapesNonReturn(allocation.getABaseInstruction())
+    or
+    operandConsumesEscaped(allocation)
   )
   or
   Configuration::phaseNeedsSoundEscapeAnalysis() and
-  resultEscapesNonReturn(allocation.getABaseInstruction())
+  (resultEscapesNonReturn(allocation.getABaseInstruction()) or operandConsumesEscaped(allocation))
 }
 
 /**

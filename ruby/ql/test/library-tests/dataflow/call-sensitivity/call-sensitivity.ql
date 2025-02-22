@@ -2,25 +2,17 @@
  * @kind path-problem
  */
 
-import ruby
+import codeql.ruby.AST
 import codeql.ruby.DataFlow
-import DataFlow::PathGraph
+import utils.test.InlineFlowTest
+import DefaultFlowTest
+import TaintFlow::PathGraph
+import codeql.ruby.dataflow.internal.DataFlowDispatch as DataFlowDispatch
 
-class Conf extends DataFlow::Configuration {
-  Conf() { this = "Conf" }
+query predicate mayBenefitFromCallContext = DataFlowDispatch::mayBenefitFromCallContext/1;
 
-  override predicate isSource(DataFlow::Node src) {
-    src.asExpr().getExpr().(StringLiteral).getValueText() = "taint"
-  }
+query predicate viableImplInCallContext = DataFlowDispatch::viableImplInCallContext/2;
 
-  override predicate isSink(DataFlow::Node sink) {
-    exists(MethodCall mc |
-      mc.getMethodName() = "sink" and
-      mc.getAnArgument() = sink.asExpr().getExpr()
-    )
-  }
-}
-
-from DataFlow::PathNode source, DataFlow::PathNode sink, Conf conf
-where conf.hasFlowPath(source, sink)
+from TaintFlow::PathNode source, TaintFlow::PathNode sink
+where TaintFlow::flowPath(source, sink)
 select sink, source, sink, "$@", source, source.toString()

@@ -2,13 +2,13 @@
  * Provides classes related to the namespace `System.Data.Common`.
  */
 
-private import csharp as csharp
+private import csharp as CSharp
 private import semmle.code.csharp.frameworks.system.Data as Data
 
 /** Definitions relating to the `System.Data.Common` namespace. */
 module SystemDataCommon {
   /** The `System.Data.Common` namespace. */
-  class Namespace extends csharp::Namespace {
+  class Namespace extends CSharp::Namespace {
     Namespace() {
       this.getParentNamespace() instanceof Data::SystemDataNamespace and
       this.hasName("Common")
@@ -16,7 +16,7 @@ module SystemDataCommon {
   }
 
   /** A class in the `System.Data.Common` namespace. */
-  class Class extends csharp::Class {
+  class Class extends CSharp::Class {
     Class() { this.getNamespace() instanceof Namespace }
   }
 

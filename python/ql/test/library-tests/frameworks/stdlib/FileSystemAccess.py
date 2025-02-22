@@ -3,24 +3,27 @@ import io
 import os
 import stat
 import tempfile
+import shutil
 
-open("file")  # $ getAPathArgument="file"
-open(file="file")  # $ getAPathArgument="file"
+open("file")  # $ getAPathArgument="file" threatModelSource[file]=open(..)
+open(file="file")  # $ getAPathArgument="file" threatModelSource[file]=open(..)
 
 o = open
 
-o("file")  # $ getAPathArgument="file"
-o(file="file")  # $ getAPathArgument="file"
+o("file")  # $ getAPathArgument="file" threatModelSource[file]=o(..)
+o(file="file")  # $ getAPathArgument="file" threatModelSource[file]=o(..)
 
 
-builtins.open("file")  # $ getAPathArgument="file"
-builtins.open(file="file")  # $ getAPathArgument="file"
+builtins.open("file")  # $ getAPathArgument="file" threatModelSource[file]=builtins.open(..)
+builtins.open(file="file")  # $ getAPathArgument="file" threatModelSource[file]=builtins.open(..)
 
 
-io.open("file")  # $ getAPathArgument="file"
-io.open(file="file")  # $ getAPathArgument="file"
+io.open("file")  # $ getAPathArgument="file" threatModelSource[file]=io.open(..)
+io.open(file="file")  # $ getAPathArgument="file" threatModelSource[file]=io.open(..)
+io.open_code("file")  # $ getAPathArgument="file"
+io.FileIO("file")  # $ getAPathArgument="file"
 
-f = open("path") # $ getAPathArgument="path"
+f = open("path") # $ getAPathArgument="path" threatModelSource[file]=open(..)
 f.write("foo") # $ getAPathArgument="path" fileWriteData="foo"
 lines = ["foo"]
 f.writelines(lines) # $ getAPathArgument="path" fileWriteData=lines
@@ -46,6 +49,9 @@ os.path.islink(path="path")  # $ getAPathArgument="path"
 
 os.path.ismount("path")  # $ getAPathArgument="path"
 os.path.ismount(path="path")  # $ getAPathArgument="path"
+
+os.path.samefile("f1", "f2")  # $ getAPathArgument="f1" getAPathArgument="f2"
+os.path.samefile(f1="f1", f2="f2")  # $ getAPathArgument="f1" getAPathArgument="f2"
 
 # actual os.path implementations
 import posixpath
@@ -238,3 +244,34 @@ tempfile.mkdtemp(suffix="suffix", prefix="prefix", dir="dir") # $ getAPathArgume
 
 tempfile.TemporaryDirectory("suffix", "prefix", "dir") # $ getAPathArgument="suffix" getAPathArgument="prefix" getAPathArgument="dir"
 tempfile.TemporaryDirectory(suffix="suffix", prefix="prefix", dir="dir") # $ getAPathArgument="suffix" getAPathArgument="prefix" getAPathArgument="dir"
+
+# ------------------------------------------------------------------------------
+# shutil
+# ------------------------------------------------------------------------------
+
+shutil.rmtree("path") # $ getAPathArgument="path"
+shutil.rmtree(path="path") # $ getAPathArgument="path"
+
+shutil.copyfile("src", "dst") # $ getAPathArgument="src" getAPathArgument="dst"
+shutil.copyfile(src="src", dst="dst") # $ getAPathArgument="src" getAPathArgument="dst"
+
+shutil.copy("src", "dst") # $ getAPathArgument="src" getAPathArgument="dst"
+shutil.copy(src="src", dst="dst") # $ getAPathArgument="src" getAPathArgument="dst"
+
+shutil.copy2("src", "dst") # $ getAPathArgument="src" getAPathArgument="dst"
+shutil.copy2(src="src", dst="dst") # $ getAPathArgument="src" getAPathArgument="dst"
+
+shutil.copytree("src", "dst") # $ getAPathArgument="src" getAPathArgument="dst"
+shutil.copytree(src="src", dst="dst") # $ getAPathArgument="src" getAPathArgument="dst"
+
+shutil.move("src", "dst") # $ getAPathArgument="src" getAPathArgument="dst"
+shutil.move(src="src", dst="dst") # $ getAPathArgument="src" getAPathArgument="dst"
+
+shutil.copymode("src", "dst") # $ getAPathArgument="src" getAPathArgument="dst"
+shutil.copymode(src="src", dst="dst") # $ getAPathArgument="src" getAPathArgument="dst"
+
+shutil.copystat("src", "dst") # $ getAPathArgument="src" getAPathArgument="dst"
+shutil.copystat(src="src", dst="dst") # $ getAPathArgument="src" getAPathArgument="dst"
+
+shutil.disk_usage("path") # $ getAPathArgument="path"
+shutil.disk_usage(path="path") # $ getAPathArgument="path"

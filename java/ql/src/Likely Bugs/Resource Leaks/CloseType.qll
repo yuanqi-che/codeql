@@ -9,7 +9,7 @@ import semmle.code.java.frameworks.Mockito
 private predicate flowsInto(Expr e, Variable v) {
   e = v.getAnAssignedValue()
   or
-  exists(CastExpr c | flowsInto(c, v) | e = c.getExpr())
+  exists(CastingExpr c | flowsInto(c, v) | e = c.getExpr())
   or
   exists(ConditionalExpr c | flowsInto(c, v) | e = c.getABranchExpr())
 }
@@ -19,7 +19,7 @@ private predicate flowsInto(Expr e, Variable v) {
  * (Prior to Java 7, these types were not subtypes of `Closeable` or `AutoCloseable`.)
  */
 predicate sqlType(RefType t) {
-  exists(RefType sup | sup = t.getASupertype*() and sup.getAMethod().hasName("close") |
+  exists(RefType sup | sup = t.getAnAncestor() and sup.getAMethod().hasName("close") |
     sup.hasQualifiedName("java.sql", "Connection") or
     sup.hasQualifiedName("java.sql", "Statement") or
     sup.hasQualifiedName("java.sql", "ResultSet")
@@ -31,7 +31,7 @@ predicate sqlType(RefType t) {
  * or a closeable type in the `java.sql` package.
  */
 private predicate closeableType(RefType t) {
-  exists(RefType supertype | supertype = t.getASupertype*() |
+  exists(RefType supertype | supertype = t.getAnAncestor() |
     supertype.hasName("Closeable") or
     supertype.hasName("AutoCloseable") or
     sqlType(supertype)
@@ -42,8 +42,8 @@ private predicate closeableType(RefType t) {
  * An access to a method on a type in the 'java.sql` package that creates a closeable object in the `java.sql` package.
  * For example, `PreparedStatement.executeQuery()` or `Connection.prepareStatement(String)`.
  */
-class SqlResourceOpeningMethodAccess extends MethodAccess {
-  SqlResourceOpeningMethodAccess() {
+class SqlResourceOpeningMethodCall extends MethodCall {
+  SqlResourceOpeningMethodCall() {
     exists(Method m | this.getMethod() = m |
       m.getDeclaringType().hasQualifiedName("java.sql", _) and
       m.getReturnType().(RefType).hasQualifiedName("java.sql", _) and
@@ -60,7 +60,7 @@ class SqlResourceOpeningMethodAccess extends MethodAccess {
 class CloseableInitExpr extends Expr {
   CloseableInitExpr() {
     this instanceof ClassInstanceExpr or
-    this instanceof SqlResourceOpeningMethodAccess
+    this instanceof SqlResourceOpeningMethodCall
   }
 }
 
@@ -86,7 +86,7 @@ private predicate closeableInit(Expr e, Expr parent) {
     )
   )
   or
-  exists(SqlResourceOpeningMethodAccess ma | ma = e and parent = e)
+  exists(SqlResourceOpeningMethodCall ma | ma = e and parent = e)
   or
   exists(LocalVariableDecl v, Expr f | e = v.getAnAccess() and flowsInto(f, v) |
     closeableInit(f, parent)
@@ -218,7 +218,7 @@ private predicate closeCalled(Variable v) {
   exists(TryStmt try | try.getAResourceVariable() = v)
   or
   // Otherwise, there should be an explicit call to a method whose name contains "close".
-  exists(MethodAccess e |
+  exists(MethodCall e |
     v = getCloseableVariable(_) or v instanceof Parameter or v instanceof LocalVariableDecl
   |
     e.getMethod().getName().toLowerCase().matches("%close%") and
@@ -263,7 +263,7 @@ private predicate closedResource(CloseableInitExpr cie) {
 }
 
 private predicate immediatelyClosed(ClassInstanceExpr cie) {
-  exists(MethodAccess ma | ma.getQualifier() = cie | ma.getMethod().hasName("close"))
+  exists(MethodCall ma | ma.getQualifier() = cie | ma.getMethod().hasName("close"))
 }
 
 /**
@@ -301,14 +301,14 @@ predicate noNeedToClose(CloseableInitExpr cie) {
     or
     exists(CloseableInitExpr sqlStmt, LocalVariableDecl v |
       // If a `java.sql.Statement` is closed, an associated `java.sql.ResultSet` is implicitly closed.
-      sqlStmt.getType().(RefType).getASupertype*() instanceof TypeStatement and
+      sqlStmt.getType().(RefType).getAnAncestor() instanceof TypeStatement and
       flowsInto(sqlStmt, v) and
       closedResource(sqlStmt) and
       cie.getType() instanceof TypeResultSet and
-      cie.(SqlResourceOpeningMethodAccess).getQualifier() = v.getAnAccess()
+      cie.(SqlResourceOpeningMethodCall).getQualifier() = v.getAnAccess()
     )
     or
-    exists(MethodAccess ma | cie.(ClassInstanceExpr).getAnArgument() = ma |
+    exists(MethodCall ma | cie.(ClassInstanceExpr).getAnArgument() = ma |
       ma.getMethod() instanceof ServletResponseGetOutputStreamMethod or
       ma.getMethod() instanceof ServletResponseGetWriterMethod or
       ma.getMethod() instanceof ServletRequestGetBodyMethod

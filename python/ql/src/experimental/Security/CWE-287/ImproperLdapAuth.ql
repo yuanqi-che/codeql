@@ -4,8 +4,8 @@
  * @kind problem
  * @problem.severity warning
  * @id py/improper-ldap-auth
- * @tags experimental
- *       security
+ * @tags security
+ *       experimental
  *       external/cwe/cwe-287
  */
 
@@ -14,18 +14,18 @@ import python
 import experimental.semmle.python.Concepts
 import semmle.python.dataflow.new.DataFlow
 
-predicate authenticatesImproperly(LDAPBind ldapBind) {
+predicate authenticatesImproperly(LdapBind ldapBind) {
   (
     DataFlow::localFlow(DataFlow::exprNode(any(None noneName)), ldapBind.getPassword()) or
     not exists(ldapBind.getPassword())
   )
   or
-  exists(StrConst emptyString |
+  exists(StringLiteral emptyString |
     emptyString.getText() = "" and
     DataFlow::localFlow(DataFlow::exprNode(emptyString), ldapBind.getPassword())
   )
 }
 
-from LDAPBind ldapBind
+from LdapBind ldapBind
 where authenticatesImproperly(ldapBind)
-select ldapBind, "The following LDAP bind operation is executed without authentication"
+select ldapBind, "The following LDAP bind operation is executed without authentication."

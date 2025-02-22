@@ -173,8 +173,6 @@ class VariableAccess extends AssignableAccess, @variable_access_expr {
  */
 class VariableRead extends VariableAccess, AssignableRead {
   override VariableRead getANextRead() { result = AssignableRead.super.getANextRead() }
-
-  override VariableRead getAReachableRead() { result = AssignableRead.super.getAReachableRead() }
 }
 
 /**
@@ -199,10 +197,6 @@ class LocalScopeVariableAccess extends VariableAccess, @local_scope_variable_acc
  */
 class LocalScopeVariableRead extends LocalScopeVariableAccess, VariableRead {
   override LocalScopeVariableRead getANextRead() { result = VariableRead.super.getANextRead() }
-
-  override LocalScopeVariableRead getAReachableRead() {
-    result = VariableRead.super.getAReachableRead()
-  }
 }
 
 /**
@@ -241,10 +235,6 @@ class ParameterAccess extends LocalScopeVariableAccess, @parameter_access_expr {
  */
 class ParameterRead extends ParameterAccess, LocalScopeVariableRead {
   override ParameterRead getANextRead() { result = LocalScopeVariableRead.super.getANextRead() }
-
-  override ParameterRead getAReachableRead() {
-    result = LocalScopeVariableRead.super.getAReachableRead()
-  }
 }
 
 /**
@@ -296,10 +286,6 @@ class LocalVariableAccess extends LocalScopeVariableAccess, @local_variable_acce
  */
 class LocalVariableRead extends LocalVariableAccess, LocalScopeVariableRead {
   override LocalVariableRead getANextRead() { result = LocalScopeVariableRead.super.getANextRead() }
-
-  override LocalVariableRead getAReachableRead() {
-    result = LocalScopeVariableRead.super.getAReachableRead()
-  }
 }
 
 /**
@@ -396,7 +382,7 @@ class MemberConstantAccess extends FieldAccess {
  * An internal helper class to share logic between `PropertyAccess` and
  * `PropertyCall`.
  */
-library class PropertyAccessExpr extends Expr, @property_access_expr {
+class PropertyAccessExpr extends Expr, @property_access_expr {
   /** Gets the target of this property access. */
   Property getProperty() { expr_access(this, result) }
 
@@ -441,8 +427,6 @@ class PropertyAccess extends AssignableMemberAccess, PropertyAccessExpr {
  */
 class PropertyRead extends PropertyAccess, AssignableRead {
   override PropertyRead getANextRead() { result = AssignableRead.super.getANextRead() }
-
-  override PropertyRead getAReachableRead() { result = AssignableRead.super.getAReachableRead() }
 }
 
 /**
@@ -536,7 +520,7 @@ class ElementWrite extends ElementAccess, AssignableWrite { }
  * An internal helper class to share logic between `IndexerAccess` and
  * `IndexerCall`.
  */
-library class IndexerAccessExpr extends Expr, @indexer_access_expr {
+class IndexerAccessExpr extends Expr, @indexer_access_expr {
   /** Gets the target of this indexer access. */
   Indexer getIndexer() { expr_access(this, result) }
 
@@ -580,8 +564,6 @@ class IndexerAccess extends AssignableMemberAccess, ElementAccess, IndexerAccess
  */
 class IndexerRead extends IndexerAccess, ElementRead {
   override IndexerRead getANextRead() { result = ElementRead.super.getANextRead() }
-
-  override IndexerRead getAReachableRead() { result = ElementRead.super.getAReachableRead() }
 }
 
 /**
@@ -622,7 +604,7 @@ class VirtualIndexerAccess extends IndexerAccess {
  * An internal helper class to share logic between `EventAccess` and
  * `EventCall`.
  */
-library class EventAccessExpr extends Expr, @event_access_expr {
+class EventAccessExpr extends Expr, @event_access_expr {
   /** Gets the target of this event access. */
   Event getEvent() { expr_access(this, result) }
 

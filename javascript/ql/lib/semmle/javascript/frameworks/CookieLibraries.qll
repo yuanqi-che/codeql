@@ -28,6 +28,12 @@ module CookieWrites {
     abstract predicate isSensitive();
 
     /**
+     * Gets the SameSite attribute of the cookie if present.
+     * Either "Strict", "Lax" or "None".
+     */
+    abstract string getSameSite();
+
+    /**
      * Holds if the cookie write happens on a server, i.e. the `httpOnly` flag is relevant.
      */
     predicate isServerSide() {
@@ -45,12 +51,12 @@ module CookieWrites {
   }
 
   /**
-   * The flag that indicates that a cookie is secure.
+   * Gets the flag that indicates that a cookie is secure.
    */
   string secure() { result = "secure" }
 
   /**
-   * The flag that indicates that a cookie is HttpOnly.
+   * Gets the flag that indicates that a cookie is HttpOnly.
    */
   string httpOnly() { result = "httpOnly" }
 }
@@ -70,7 +76,7 @@ private predicate canHaveSensitiveCookie(DataFlow::Node node) {
     HeuristicNames::nameIndicatesSensitiveData([s, getCookieName(s)], _)
   )
   or
-  node.asExpr() instanceof SensitiveExpr
+  node instanceof SensitiveNode
 }
 
 /**
@@ -96,6 +102,31 @@ private predicate hasCookieAttribute(string s, string attribute) {
 }
 
 /**
+ * Gets the value for a `Set-Cookie` header attribute.
+ */
+bindingset[s, attribute]
+private string getCookieValue(string s, string attribute) {
+  result = s.regexpCapture("(?i).*;\\s*" + attribute + "=(\\w+)\\b\\s*;?.*$", 1)
+}
+
+/**
+ * Gets the "SameSite" value for a given `node`.
+ * Converts boolean values to the corresponding string value.
+ *
+ * Not all libraries support boolean values for the `SameSite` attribute,
+ * but here we assume that they do.
+ */
+private string getSameSiteValue(DataFlow::Node node) {
+  node.mayHaveStringValue(result)
+  or
+  node.mayHaveBooleanValue(true) and
+  result = "Strict"
+  or
+  node.mayHaveBooleanValue(false) and
+  result = "Lax"
+}
+
+/**
  * A model of the `js-cookie` library (https://github.com/js-cookie/js-cookie).
  */
 private module JsCookie {
@@ -105,7 +136,9 @@ private module JsCookie {
   DataFlow::CallNode libMemberCall(string name) {
     result = DataFlow::globalVarRef("Cookie").getAMemberCall(name) or
     result = DataFlow::globalVarRef("Cookie").getAMemberCall("noConflict").getAMemberCall(name) or
-    result = DataFlow::moduleMember("js-cookie", name).getACall()
+    result = DataFlow::moduleMember("js-cookie", name).getACall() or
+    // es-cookie behaves basically the same as js-cookie
+    result = DataFlow::moduleMember("es-cookie", name).getACall()
   }
 
   class ReadAccess extends PersistentReadAccess, DataFlow::CallNode {
@@ -117,7 +150,8 @@ private module JsCookie {
   }
 
   class WriteAccess extends PersistentWriteAccess, DataFlow::CallNode,
-    CookieWrites::ClientSideCookieWrite {
+    CookieWrites::ClientSideCookieWrite
+  {
     WriteAccess() { this = libMemberCall("set") }
 
     string getKey() { this.getArgument(0).mayHaveStringValue(result) }
@@ -132,6 +166,10 @@ private module JsCookie {
     }
 
     override predicate isSensitive() { canHaveSensitiveCookie(this.getArgument(0)) }
+
+    override string getSameSite() {
+      result = getSameSiteValue(this.getOptionArgument(2, "sameSite"))
+    }
   }
 }
 
@@ -155,7 +193,8 @@ private module BrowserCookies {
   }
 
   class WriteAccess extends PersistentWriteAccess, DataFlow::CallNode,
-    CookieWrites::ClientSideCookieWrite {
+    CookieWrites::ClientSideCookieWrite
+  {
     WriteAccess() { this = libMemberCall("set") }
 
     string getKey() { this.getArgument(0).mayHaveStringValue(result) }
@@ -173,6 +212,15 @@ private module BrowserCookies {
     }
 
     override predicate isSensitive() { canHaveSensitiveCookie(this.getArgument(0)) }
+
+    override string getSameSite() {
+      result = getSameSiteValue(this.getOptionArgument(2, "samesite"))
+      or
+      // or, an explicit default has been set
+      DataFlow::moduleMember("browser-cookies", "defaults")
+          .getAPropertyWrite("samesite")
+          .mayHaveStringValue(result)
+    }
   }
 }
 
@@ -196,7 +244,8 @@ private module LibCookie {
   }
 
   class WriteAccess extends PersistentWriteAccess, DataFlow::CallNode,
-    CookieWrites::ClientSideCookieWrite {
+    CookieWrites::ClientSideCookieWrite
+  {
     WriteAccess() { this = libMemberCall("serialize") }
 
     string getKey() { this.getArgument(0).mayHaveStringValue(result) }
@@ -211,6 +260,10 @@ private module LibCookie {
     }
 
     override predicate isSensitive() { canHaveSensitiveCookie(this.getArgument(0)) }
+
+    override string getSameSite() {
+      result = getSameSiteValue(this.getOptionArgument(2, "sameSite"))
+    }
   }
 }
 
@@ -221,26 +274,28 @@ private module ExpressCookies {
   /**
    * A cookie set using `response.cookie` from `express` module (https://expressjs.com/en/api.html#res.cookie).
    */
-  private class InsecureExpressCookieResponse extends CookieWrites::CookieWrite,
-    DataFlow::MethodCallNode {
-    InsecureExpressCookieResponse() { this.asExpr() instanceof Express::SetCookie }
-
+  private class InsecureExpressCookieResponse extends CookieWrites::CookieWrite instanceof Express::SetCookie
+  {
     override predicate isSecure() {
       // A cookie is secure if there are cookie options with the `secure` flag set to `true`.
       // The default is `false`.
-      exists(DataFlow::Node value | value = this.getOptionArgument(2, CookieWrites::secure()) |
+      exists(DataFlow::Node value | value = super.getOptionArgument(2, CookieWrites::secure()) |
         not value.mayHaveBooleanValue(false) // anything but `false` is accepted as being maybe true
       )
     }
 
-    override predicate isSensitive() { canHaveSensitiveCookie(this.getArgument(0)) }
+    override predicate isSensitive() { canHaveSensitiveCookie(super.getArgument(0)) }
 
     override predicate isHttpOnly() {
       // A cookie is httpOnly if there are cookie options with the `httpOnly` flag set to `true`.
       // The default is `false`.
-      exists(DataFlow::Node value | value = this.getOptionArgument(2, CookieWrites::httpOnly()) |
+      exists(DataFlow::Node value | value = super.getOptionArgument(2, CookieWrites::httpOnly()) |
         not value.mayHaveBooleanValue(false) // anything but `false` is accepted as being maybe true
       )
+    }
+
+    override string getSameSite() {
+      result = getSameSiteValue(super.getOptionArgument(2, "sameSite"))
     }
   }
 
@@ -248,7 +303,8 @@ private module ExpressCookies {
    * A cookie set using the `express` module `cookie-session` (https://github.com/expressjs/cookie-session).
    */
   class InsecureCookieSession extends ExpressLibraries::CookieSession::MiddlewareInstance,
-    CookieWrites::CookieWrite {
+    CookieWrites::CookieWrite
+  {
     private DataFlow::Node getCookieFlagValue(string flag) {
       result = this.getOptionArgument(0, flag)
     }
@@ -268,13 +324,16 @@ private module ExpressCookies {
       // A cookie is httpOnly if the `httpOnly` flag is not explicitly set to `false`.
       not this.getCookieFlagValue(CookieWrites::httpOnly()).mayHaveBooleanValue(false)
     }
+
+    override string getSameSite() { result = getSameSiteValue(this.getCookieFlagValue("sameSite")) }
   }
 
   /**
    * A cookie set using the `express` module `express-session` (https://github.com/expressjs/session).
    */
   class InsecureExpressSessionCookie extends ExpressLibraries::ExpressSession::MiddlewareInstance,
-    CookieWrites::CookieWrite {
+    CookieWrites::CookieWrite
+  {
     private DataFlow::Node getCookieFlagValue(string flag) {
       result = this.getOption("cookie").getALocalSource().getAPropertyWrite(flag).getRhs()
     }
@@ -297,6 +356,8 @@ private module ExpressCookies {
       // A cookie is httpOnly if the `httpOnly` flag is not explicitly set to `false`.
       not this.getCookieFlagValue(CookieWrites::httpOnly()).mayHaveBooleanValue(false)
     }
+
+    override string getSameSite() { result = getSameSiteValue(this.getCookieFlagValue("sameSite")) }
   }
 }
 
@@ -309,15 +370,15 @@ private module ExpressCookies {
  * In case an array is passed `setHeader("Set-Cookie", [...]` it sets multiple cookies.
  * We model a `CookieWrite` for each array element.
  */
-private class HTTPCookieWrite extends CookieWrites::CookieWrite {
+private class HttpCookieWrite extends CookieWrites::CookieWrite {
   string header;
 
-  HTTPCookieWrite() {
-    exists(HTTP::CookieDefinition setCookie |
-      this.asExpr() = setCookie.getHeaderArgument() and
+  HttpCookieWrite() {
+    exists(Http::CookieDefinition setCookie |
+      this = setCookie.getHeaderArgument() and
       not this instanceof DataFlow::ArrayCreationNode
       or
-      this = setCookie.getHeaderArgument().flow().(DataFlow::ArrayCreationNode).getAnElement()
+      this = setCookie.getHeaderArgument().(DataFlow::ArrayCreationNode).getAnElement()
     ) and
     header =
       [
@@ -339,6 +400,8 @@ private class HTTPCookieWrite extends CookieWrites::CookieWrite {
   }
 
   override predicate isSensitive() { canHaveSensitiveCookie(this) }
+
+  override string getSameSite() { result = getCookieValue(header, "SameSite") }
 }
 
 /**
@@ -365,4 +428,6 @@ private class DocumentCookieWrite extends CookieWrites::ClientSideCookieWrite {
   }
 
   override predicate isSensitive() { canHaveSensitiveCookie(write.getRhs()) }
+
+  override string getSameSite() { result = getCookieValue(cookie, "SameSite") }
 }

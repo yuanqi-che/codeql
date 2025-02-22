@@ -58,8 +58,8 @@ class SpringBeanPropertySetterMethod extends Method {
  *
  * Confusingly, this is a different form of autowiring to the `@Autowired` annotation.
  */
-class SpringBeanXMLAutowiredSetterMethod extends Method {
-  SpringBeanXMLAutowiredSetterMethod() {
+class SpringBeanXmlAutowiredSetterMethod extends Method {
+  SpringBeanXmlAutowiredSetterMethod() {
     // The bean as marked with some form of autowiring in the XML file.
     exists(string xmlAutowire |
       xmlAutowire = this.getDeclaringType().(SpringBeanRefType).getSpringBean().getAutowire()
@@ -308,9 +308,7 @@ class SpringQualifierDefinitionAnnotation extends Annotation {
   /**
    * Gets the value of the qualifier field for this qualifier.
    */
-  string getQualifierValue() {
-    result = this.getValue("value").(CompileTimeConstantExpr).getStringValue()
-  }
+  string getQualifierValue() { result = this.getStringValue("value") }
 }
 
 /**
@@ -322,9 +320,7 @@ class SpringQualifierAnnotation extends Annotation {
   /**
    * Gets the value of the qualifier field for this qualifier.
    */
-  string getQualifierValue() {
-    result = this.getValue("value").(CompileTimeConstantExpr).getStringValue()
-  }
+  string getQualifierValue() { result = this.getStringValue("value") }
 
   /**
    * Gets the bean definition in an XML file that this qualifier resolves to, if any.
@@ -347,9 +343,7 @@ class SpringResourceAnnotation extends Annotation {
   /**
    * Gets the specified name value, if any.
    */
-  string getNameValue() {
-    result = this.getValue("name").(CompileTimeConstantExpr).getStringValue()
-  }
+  string getNameValue() { result = this.getStringValue("name") }
 
   /**
    * Gets the bean definition in an XML file that the resource resolves to, if any.

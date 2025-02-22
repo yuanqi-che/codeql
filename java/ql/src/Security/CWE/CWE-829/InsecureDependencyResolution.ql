@@ -17,11 +17,12 @@ import java
 import semmle.code.xml.MavenPom
 
 predicate isInsecureRepositoryUsage(DeclaredRepository repository) {
-  repository.getUrl().regexpMatch("(?i)^(http|ftp)://(?!localhost[:/]).*")
+  repository.getRepositoryUrl().regexpMatch("(?i)^(http|ftp)://(?!localhost[:/]).*") and
+  not repository.isDisabled()
 }
 
 from DeclaredRepository repository
 where isInsecureRepositoryUsage(repository)
 select repository,
   "Downloading or uploading artifacts over insecure protocol (eg. http or ftp) to/from repository " +
-    repository.getUrl()
+    repository.getRepositoryUrl()

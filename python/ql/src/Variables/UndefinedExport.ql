@@ -14,7 +14,7 @@
 import python
 
 /** Whether name is declared in the __all__ list of this module */
-predicate declaredInAll(Module m, StrConst name) {
+predicate declaredInAll(Module m, StringLiteral name) {
   exists(Assign a, GlobalVariable all |
     a.defines(all) and
     a.getScope() = m and
@@ -49,7 +49,7 @@ predicate mutates_globals(ModuleValue m) {
       or
       // In Python 3.8, Enum._convert_ is implemented using a metaclass, and our points-to
       // analysis doesn't handle that well enough. So we need a special case for this
-      not exists(Value enum_convert | enum_convert = enum_class.attr("_convert")) and
+      not exists(enum_class.attr("_convert")) and
       exists(CallNode call | call.getScope() = m.getScope() |
         call.getFunction().(AttrNode).getObject(["_convert", "_convert_"]).pointsTo() = enum_class
       )
@@ -70,7 +70,7 @@ predicate contains_unknown_import_star(ModuleValue m) {
   )
 }
 
-from ModuleValue m, StrConst name, string exported_name
+from ModuleValue m, StringLiteral name, string exported_name
 where
   declaredInAll(m.getScope(), name) and
   exported_name = name.getText() and

@@ -4,12 +4,33 @@
  */
 
 import javascript
-import Xss::StoredXss
+import StoredXssCustomizations::StoredXss
+private import Xss::Shared as Shared
 
 /**
- * A taint-tracking configuration for reasoning about XSS.
+ * A taint-tracking configuration for reasoning about stored XSS.
  */
-class Configuration extends TaintTracking::Configuration {
+module StoredXssConfig implements DataFlow::ConfigSig {
+  predicate isSource(DataFlow::Node source) { source instanceof Source }
+
+  predicate isSink(DataFlow::Node sink) { sink instanceof Sink }
+
+  predicate isBarrier(DataFlow::Node node) {
+    node instanceof Sanitizer or node = Shared::BarrierGuard::getABarrierNode()
+  }
+
+  predicate observeDiffInformedIncrementalMode() { any() }
+}
+
+/**
+ * Taint-tracking for reasoning about stored XSS.
+ */
+module StoredXssFlow = TaintTracking::Global<StoredXssConfig>;
+
+/**
+ * DEPRECATED. Use the `StoredXssFlow` module instead.
+ */
+deprecated class Configuration extends TaintTracking::Configuration {
   Configuration() { this = "StoredXss" }
 
   override predicate isSource(DataFlow::Node source) { source instanceof Source }
@@ -22,16 +43,15 @@ class Configuration extends TaintTracking::Configuration {
   }
 
   override predicate isSanitizerGuard(TaintTracking::SanitizerGuardNode guard) {
-    guard instanceof SanitizerGuard
+    guard instanceof QuoteGuard or
+    guard instanceof ContainsHtmlGuard
   }
 }
 
-/** A file name, considered as a flow source for stored XSS. */
-class FileNameSourceAsSource extends Source {
-  FileNameSourceAsSource() { this instanceof FileNameSource }
+private class QuoteGuard extends Shared::QuoteGuard {
+  QuoteGuard() { this = this }
 }
 
-/** User-controlled torrent information, considered as a flow source for stored XSS. */
-class UserControlledTorrentInfoAsSource extends Source {
-  UserControlledTorrentInfoAsSource() { this instanceof ParseTorrent::UserControlledTorrentInfo }
+private class ContainsHtmlGuard extends Shared::ContainsHtmlGuard {
+  ContainsHtmlGuard() { this = this }
 }

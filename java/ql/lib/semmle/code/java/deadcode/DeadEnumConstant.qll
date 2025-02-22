@@ -1,5 +1,4 @@
 import java
-import semmle.code.java.JDKAnnotations
 
 /**
  * Direct flow of values (i.e. object references) through expressions.
@@ -20,7 +19,7 @@ VarAccess valueAccess(EnumConstant e) {
   (
     exists(Call c |
       c.getAnArgument() = valueFlow+(result) or
-      c.(MethodAccess).getQualifier() = valueFlow+(result)
+      c.(MethodCall).getQualifier() = valueFlow+(result)
     )
     or
     exists(Assignment a | a.getSource() = valueFlow+(result))
@@ -48,19 +47,19 @@ predicate exception(EnumConstant e) {
     )
     or
     // A method iterates over the values of an enum.
-    exists(MethodAccess values | values.getMethod().getDeclaringType() = t |
+    exists(MethodCall values | values.getMethod().getDeclaringType() = t |
       values.getParent() instanceof EnhancedForStmt or
-      values.getParent().(MethodAccess).getMethod().hasName("findThisIn")
+      values.getParent().(MethodCall).getMethod().hasName("findThisIn")
     )
     or
     // The `valueOf` method is called, meaning that depending on the string any constant
     // could be retrieved.
-    exists(MethodAccess valueOf | valueOf.getMethod().getDeclaringType() = t |
+    exists(MethodCall valueOf | valueOf.getMethod().getDeclaringType() = t |
       valueOf.getMethod().hasName("valueOf")
     )
     or
     // Entire `Enum` annotated with reflective annotation.
-    exists(ReflectiveAccessAnnotation ann | ann = t.getAnAnnotation())
+    t.getAnAnnotation() instanceof ReflectiveAccessAnnotation
   )
   or
   // Enum field annotated with reflective annotation.

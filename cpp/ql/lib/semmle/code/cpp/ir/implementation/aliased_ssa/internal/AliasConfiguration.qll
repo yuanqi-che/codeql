@@ -2,12 +2,12 @@ private import AliasConfigurationInternal
 private import semmle.code.cpp.ir.implementation.unaliased_ssa.IR
 private import cpp
 private import AliasAnalysis
-private import semmle.code.cpp.ir.implementation.unaliased_ssa.internal.SimpleSSA as UnaliasedSSA
+private import semmle.code.cpp.ir.implementation.unaliased_ssa.internal.SimpleSSA as UnaliasedSsa
 
 private newtype TAllocation =
   TVariableAllocation(IRVariable var) {
     // Only model variables that were not already handled in unaliased SSA.
-    not UnaliasedSSA::canReuseSSAForVariable(var)
+    not UnaliasedSsa::canReuseSsaForVariable(var)
   } or
   TIndirectParameterAllocation(IRAutomaticVariable var) {
     exists(InitializeIndirectionInstruction instr | instr.getIRVariable() = var)
@@ -22,7 +22,7 @@ private newtype TAllocation =
 abstract class Allocation extends TAllocation {
   abstract string toString();
 
-  final string getAllocationString() { result = toString() }
+  final string getAllocationString() { result = this.toString() }
 
   abstract Instruction getABaseInstruction();
 
@@ -101,6 +101,8 @@ class IndirectParameterAllocation extends Allocation, TIndirectParameterAllocati
   final override predicate isAlwaysAllocatedOnStack() { none() }
 
   final override predicate alwaysEscapes() { none() }
+
+  final IRAutomaticVariable getIRVariable() { result = var }
 }
 
 class DynamicAllocation extends Allocation, TDynamicAllocation {
@@ -144,3 +146,8 @@ class DynamicAllocation extends Allocation, TDynamicAllocation {
 }
 
 predicate phaseNeedsSoundEscapeAnalysis() { none() }
+
+UnaliasedSsa::Allocation getOldAllocation(VariableAllocation allocation) {
+  UnaliasedSsa::canReuseSsaForVariable(allocation.getIRVariable()) and
+  result = allocation.getIRVariable()
+}

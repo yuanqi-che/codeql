@@ -21,13 +21,13 @@ where
     pa.getTarget().hasName("EnableHeaderChecking") and
     pa.getTarget()
         .getDeclaringType()
-        .hasQualifiedName("System.Web.Configuration", "HttpRuntimeSection") and
+        .hasFullyQualifiedName("System.Web.Configuration", "HttpRuntimeSection") and
     a.getRValue().getValue() = "false" and
     a = l
   )
   or
   // header checking is disabled in a configuration file
-  exists(HttpRuntimeXMLElement e, XMLAttribute a |
+  exists(HttpRuntimeXmlElement e, XmlAttribute a |
     a = e.getAttribute("enableHeaderChecking") and
     a.getValue().toLowerCase() = "false" and
     a = l

@@ -3,8 +3,6 @@
  */
 
 import java
-import semmle.code.java.Type
-import semmle.code.java.Member
 
 /*--- Types ---*/
 /** The interface `javax.naming.Context`. */
@@ -46,8 +44,12 @@ class MethodLdapNameAddAll extends Method {
   }
 }
 
-/** A method with the name `clone` declared in `javax.naming.ldap.LdapName`. */
-class MethodLdapNameClone extends Method {
+/**
+ * DEPRECATED: No longer needed as clone steps are handled uniformly.
+ *
+ * A method with the name `clone` declared in `javax.naming.ldap.LdapName`.
+ */
+deprecated class MethodLdapNameClone extends Method {
   MethodLdapNameClone() {
     this.getDeclaringType() instanceof TypeLdapName and
     this.hasName("clone")

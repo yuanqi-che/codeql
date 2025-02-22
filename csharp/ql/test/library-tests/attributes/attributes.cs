@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -86,4 +88,88 @@ class My2Attribute : Attribute
 {
     public int X { get; set; }
     public My2Attribute(bool a, bool b, int i = 12, int j = 13) { }
+}
+
+class My3Attribute : Attribute
+{
+    public My3Attribute(int x) { }
+}
+
+[My3Attribute(1)]
+[return: My3Attribute(2)]
+delegate int My1Delegate(string message);
+
+[return: My3Attribute(3)]
+[type: My3Attribute(4)]
+delegate string My2Delegate(string message);
+
+public class MyAttributeUsage
+{
+    [My3Attribute(5)]
+    [return: My3Attribute(6)]
+    public static int operator +(MyAttributeUsage a, MyAttributeUsage b) => 0;
+
+    [My3Attribute(15)]
+    public int this[int x]
+    {
+        [My3Attribute(7)]
+        [return: My3Attribute(8)]
+        get { return x + 1; }
+
+        [method: My3Attribute(9)]
+        [param: My3Attribute(10)]
+        set { return; }
+    }
+
+    private int p;
+    [My3Attribute(16)]
+    public int Prop1
+    {
+        [method: My3Attribute(11)]
+        [return: My3Attribute(12)]
+        get { return p; }
+
+        [My3Attribute(13)]
+        [param: My3Attribute(14)]
+        set { p = value; }
+    }
+}
+
+class Class1
+{
+    public class ParamsAttribute : Attribute
+    {
+        public ParamsAttribute(string s1, string s2, params int[] args) { }
+    }
+
+    [Params("a", "b", 1, 2, 3)]
+    public void M1() { }
+
+    [Params(s1: "a", s2: "b", 1, 2, 3)]
+    public void M2() { }
+
+    [Params(args: 1, s2: "b", s1: "a")]
+    public void M3() { }
+
+    [Params(args: new[] { 1 }, s2: "b", s1: "a")]
+    public void M4() { }
+}
+
+[Experimental("MyExperimentalClassId")]
+public class MyExperimentalClass
+{
+    [Experimental("MyExperimentalMethodId")]
+    public void MyExperimentalMethod() { }
+}
+
+public class MyOverloadResolutionClass
+{
+    [OverloadResolutionPriority(-1)]
+    public void M(int[] arr) { }
+
+    [OverloadResolutionPriority(1)]
+    public void M(IEnumerable<int> e) { }
+
+    [OverloadResolutionPriority(2)]
+    public void M(ReadOnlySpan<int> s) { }
 }

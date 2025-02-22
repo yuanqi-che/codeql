@@ -11,17 +11,8 @@
  */
 
 import java
-import HardcodedCredentials
+import semmle.code.java.security.HardcodedCredentialsComparison
 
-class EqualsAccess extends MethodAccess {
-  EqualsAccess() { getMethod() instanceof EqualsMethod }
-}
-
-from EqualsAccess sink, HardcodedExpr source, PasswordVariable p
-where
-  source = sink.getQualifier() and
-  p.getAnAccess() = sink.getArgument(0)
-  or
-  source = sink.getArgument(0) and
-  p.getAnAccess() = sink.getQualifier()
+from EqualsCall sink, HardcodedExpr source, PasswordVariable p
+where isHardcodedCredentialsComparison(sink, source, p)
 select source, "Hard-coded value is $@ with password variable $@.", sink, "compared", p, p.getName()

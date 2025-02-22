@@ -9,6 +9,7 @@
  * @precision medium
  * @id java/server-directory-listing
  * @tags security
+ *       experimental
  *       external/cwe/cwe-548
  */
 
@@ -27,7 +28,7 @@ private class DefaultTomcatServlet extends WebServletClass {
 /**
  * The `<init-param>` element in a `web.xml` file, nested under a `<servlet>` element controlling directory listing.
  */
-class DirectoryListingInitParam extends WebXMLElement {
+class DirectoryListingInitParam extends WebXmlElement {
   DirectoryListingInitParam() {
     this.getName() = "init-param" and
     this.getAChild("param-name").getTextValue() = "listings" and
@@ -45,6 +46,7 @@ class DirectoryListingInitParam extends WebXMLElement {
   }
 }
 
-from DirectoryListingInitParam initp
-where initp.isListingEnabled()
-select initp, "Directory listing should be disabled to mitigate filename and path disclosure"
+deprecated query predicate problems(DirectoryListingInitParam initp, string message) {
+  initp.isListingEnabled() and
+  message = "Directory listing should be disabled to mitigate filename and path disclosure."
+}
